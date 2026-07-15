@@ -406,16 +406,95 @@ function EmptyState({ onOpenAdd, onSeedDemo }) {
   );
 }
 
+/* チェック時の効果音。外部音源ファイルを使わず、その場で短い音を合成する。
+   再生できない環境(対応ブラウザでない等)では黙って何もしない。 */
+function playCheckSound(level) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const now = ctx.currentTime;
+
+    if (level === 'none') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.25);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else {
+      const freqPairs = { full: [523, 784], good: [494, 659], partial: [440, 523] };
+      const [f1, f2] = freqPairs[level] || [440, 523];
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f1, now);
+      osc.frequency.setValueAtTime(f2, now + 0.09);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    }
+    osc.onended = () => ctx.close();
+  } catch (e) {
+    // 音を出せない環境では静かに諦める
+  }
+}
+
 function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
   const stats = computeStats(habit);
   const today = stats.todayStatus;
   const hasTodayNote = Boolean(habit.notes && habit.notes[todayStr()]);
   const orderedLevels = [...CHECK_LEVELS].reverse(); // full → good → partial → none
+  const [popup, setPopup] = useState(null);
+  const [reaction, setReaction] = useState(null); // 'good' | 'bad' | null
+
+  function handleLevelClick(lvlKey) {
+    const currentStatus = habit.logs[todayStr()];
+    const newLogs = { ...habit.logs };
+    if (currentStatus === lvlKey) delete newLogs[todayStr()];
+    else newLogs[todayStr()] = lvlKey;
+
+    onSetToday(habit.id, lvlKey);
+
+    // 取り消し操作(同じボタンをもう一度押した)のときは演出を出さない
+    if (newLogs[todayStr()] === undefined) return;
+
+    const before = computeStats(habit);
+    const after = computeStats({ ...habit, logs: newLogs });
+    const delta = after.exp - before.exp;
+
+    setPopup({ text: delta >= 0 ? `+${delta}` : `${delta}`, positive: delta >= 0, key: Date.now() });
+    setReaction(lvlKey === 'none' ? 'bad' : 'good');
+    setTimeout(() => setPopup(null), 900);
+    setTimeout(() => setReaction(null), 550);
+
+    playCheckSound(lvlKey);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(lvlKey === 'none' ? [15, 30, 15] : 12);
+    }
+  }
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
       <div className="flex items-center gap-3">
-        <button onClick={() => onOpenDetail(habit)} className="relative flex-shrink-0 w-14 h-14 flex items-center justify-center">
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={48} />
+        <button onClick={() => onOpenDetail(habit)} className="relative flex-shrink-0 w-14 h-14 flex items-center justify-center" style={{ overflow: 'visible' }}>
+          <div className={reaction === 'good' ? 'animate-checkBounce' : reaction === 'bad' ? 'animate-checkShake' : ''}>
+            <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={48} />
+          </div>
+          {popup && (
+            <span
+              key={popup.key}
+              className="absolute -top-2 left-1/2 animate-floatUp text-sm font-bold pointer-events-none"
+              style={{ color: popup.positive ? habit.color : '#ff3d81', ...monoStyle }}
+            >
+              {popup.text}
+            </span>
+          )}
         </button>
         <button onClick={() => onOpenDetail(habit)} className="flex-1 min-w-0 text-left">
           <div className="text-slate-100 font-medium truncate flex items-center gap-1.5">
@@ -443,8 +522,8 @@ function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
           return (
             <button
               key={lvl.key}
-              onClick={() => onSetToday(habit.id, lvl.key)}
-              className="h-11 rounded-lg flex items-center justify-center text-lg font-medium transition"
+              onClick={() => handleLevelClick(lvl.key)}
+              className="h-11 rounded-lg flex items-center justify-center text-lg font-medium transition-transform active:scale-90"
               style={{
                 ...levelStyle(lvl.key, habit.color),
                 color: LEVEL_TEXT_COLOR[lvl.key],
