@@ -4,13 +4,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Check, X, Trash2, Edit3, Home as HomeIcon, BookOpen, Flame, Sparkles,
-  ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut,
+  ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut, HelpCircle,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import {
   GAME_BALANCE, CHECK_LEVELS, LEVEL_SCORE, LEVEL_LABEL, LEVEL_SYMBOL, LEVEL_TEXT_COLOR,
-  levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS,
+  levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS, THEMES,
   displayStyle, monoStyle, todayStr, genId, getSyncedLogs, computeStats, computeStatsAsOf,
   weeklyAggregation, monthlyAggregation, seedDemoData,
 } from '@/lib/gameLogic';
@@ -68,7 +68,62 @@ function FaceLayer({ condition, bodyR }) {
   );
 }
 
-function Creature({ stage, condition, color, size = 72 }) {
+function ThemeAccessory({ theme, bodyR }) {
+  if (theme === 'muscle') {
+    // 筋肉系: 右手のそばにダンベル
+    const hx = 50 + bodyR + 3;
+    const hy = 48;
+    return (
+      <g>
+        <rect x={hx - 7} y={hy - 1.5} width="14" height="3" rx="1.5" fill="#1e293b" />
+        <circle cx={hx - 7} cy={hy} r="4" fill="#1e293b" />
+        <circle cx={hx + 7} cy={hy} r="4" fill="#1e293b" />
+      </g>
+    );
+  }
+  if (theme === 'study') {
+    // 学習系: 目の位置に合わせたメガネ
+    const eyeY = 48;
+    const eyeDx = bodyR * 0.35;
+    return (
+      <g stroke="#1e293b" strokeWidth="2" fill="none">
+        <circle cx={50 - eyeDx} cy={eyeY} r="6" />
+        <circle cx={50 + eyeDx} cy={eyeY} r="6" />
+        <line x1={50 - eyeDx + 6} y1={eyeY} x2={50 + eyeDx - 6} y2={eyeY} />
+      </g>
+    );
+  }
+  if (theme === 'wellness') {
+    // 生活・休息系: 頭のそばに小さな花
+    const fx = 50 - bodyR - 6;
+    const fy = 40;
+    return (
+      <g fill="#fde68a">
+        <circle cx={fx} cy={fy - 4} r="3" />
+        <circle cx={fx} cy={fy + 4} r="3" />
+        <circle cx={fx - 4} cy={fy} r="3" />
+        <circle cx={fx + 4} cy={fy} r="3" />
+        <circle cx={fx} cy={fy} r="2.5" fill="#fbbf24" />
+      </g>
+    );
+  }
+  if (theme === 'creative') {
+    // クリエイティブ系: パレット
+    const hx = 50 + bodyR + 3;
+    const hy = 46;
+    return (
+      <g>
+        <ellipse cx={hx} cy={hy} rx="7" ry="5" fill="#e2e8f0" opacity="0.9" />
+        <circle cx={hx - 3} cy={hy - 1.5} r="1.3" fill="#ff3d81" />
+        <circle cx={hx + 1} cy={hy - 2} r="1.3" fill="#22e2ff" />
+        <circle cx={hx + 3} cy={hy + 1.5} r="1.3" fill="#fbbf24" />
+      </g>
+    );
+  }
+  return null;
+}
+
+function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
   const isDown = condition === 'down';
   const isGreat = condition === 'great';
   const bodyR = 20 + stage * 3;
@@ -79,7 +134,8 @@ function Creature({ stage, condition, color, size = 72 }) {
     ? `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color})`
     : `drop-shadow(0 0 3px ${color}88)`;
 
-  /* 段階が上がるごとに見た目のパーツが増えていく(脚→腕→トゲ→翼→マント→王冠) */
+  /* 段階が上がるごとに見た目のパーツが増えていく(脚→腕→トゲ→翼→マント→王冠)。
+     テーマ別のアクセサリーは腕が生える段階(stage>=3)からあわせて表示する。 */
   const hasLegs = stage >= 2;
   const hasArms = stage >= 3;
   const spikeCount = stage >= 4 ? Math.min(5, stage - 3) : 0;
@@ -152,6 +208,7 @@ function Creature({ stage, condition, color, size = 72 }) {
       )}
 
       {stage !== 0 && <FaceLayer condition={condition} bodyR={bodyR} />}
+      {hasArms && <ThemeAccessory theme={theme} bodyR={bodyR} />}
     </svg>
   );
 }
@@ -233,7 +290,7 @@ function EvolutionGallery({ habit }) {
         const s = computeStatsAsOf(habit, cutoff);
         return (
           <div key={p.label} className="flex flex-col items-center gap-1 flex-1">
-            <Creature stage={s.stage} condition={s.condition} color={habit.color} size={56} />
+            <Creature stage={s.stage} condition={s.condition} color={habit.color} theme={habit.theme} size={56} />
             <span className="text-xs text-slate-500">{p.label}</span>
             <span className="text-xs" style={monoStyle}>Lv.{s.level}</span>
           </div>
@@ -336,7 +393,7 @@ function HabitRow({ habit, onSetToday, onOpenDetail }) {
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
       <div className="flex items-center gap-3">
         <button onClick={() => onOpenDetail(habit)} className="relative flex-shrink-0 w-14 h-14 flex items-center justify-center">
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} size={48} />
+          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={48} />
         </button>
         <button onClick={() => onOpenDetail(habit)} className="flex-1 min-w-0 text-left">
           <div className="text-slate-100 font-medium truncate flex items-center gap-1.5">
@@ -417,7 +474,7 @@ function GalleryTab({ habits, onOpenDetail }) {
             const cond = CONDITION_LABEL[stats.condition];
             return (
               <button key={h.id} onClick={() => onOpenDetail(h)} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-slate-600 transition">
-                <Creature stage={stats.stage} condition={stats.condition} color={h.color} size={64} />
+                <Creature stage={stats.stage} condition={stats.condition} color={h.color} theme={h.theme} size={64} />
                 <div className="text-slate-100 text-sm font-medium truncate w-full text-center">{h.icon} {h.name}</div>
                 <div className="text-xs text-slate-500" style={monoStyle}>Lv.{stats.level} ・ {STAGE_NAMES[stats.stage]}</div>
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: cond.color, border: `1px solid ${cond.color}` }}>{cond.text}</span>
@@ -464,7 +521,7 @@ function StatsView({ habit, onClose }) {
       <div className="sticky top-0 bg-slate-950 border-b border-slate-800 p-4 flex items-center gap-3 z-10">
         <button onClick={onClose} className="text-slate-400"><ChevronLeft size={22} /></button>
         <div className="flex items-center gap-2">
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} size={32} />
+          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={32} />
           <span className="text-slate-100 font-medium">{habit.icon} {habit.name}</span>
         </div>
       </div>
@@ -713,6 +770,14 @@ function PlaygroundTab({ habits }) {
   const bodiesRef = useRef({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const CREATURE_SIZE = 64;
+  // 物理演算の調整値。THROW_POWERを下げる/MAX_THROW_SPEEDを絞ると「軽くてすぐ飛んでいく」感じが弱まり、
+  // GRAVITYを上げると落下が速くなって重量感が出る。
+  const GRAVITY = 0.85;
+  const AIR_FRICTION = 0.99;
+  const BOUNCE_DAMPING = 0.45;
+  const GROUND_FRICTION = 0.8;
+  const THROW_POWER = 7;
+  const MAX_THROW_SPEED = 22;
 
   useEffect(() => {
     function measure() {
@@ -743,15 +808,15 @@ function PlaygroundTab({ habits }) {
         const b = bodies[id];
         if (!b.el) return;
         if (!b.dragging) {
-          b.vy += 0.6;
-          b.vx *= 0.99;
+          b.vy += GRAVITY;
+          b.vx *= AIR_FRICTION;
           b.x += b.vx;
           b.y += b.vy;
           const floor = h - CREATURE_SIZE;
           if (b.y > floor) {
             b.y = floor;
-            b.vy *= -0.5;
-            b.vx *= 0.85;
+            b.vy *= -BOUNCE_DAMPING;
+            b.vx *= GROUND_FRICTION;
             if (Math.abs(b.vy) < 1.5) b.vy = 0;
           }
           if (b.x < 0) { b.x = 0; b.vx *= -0.6; }
@@ -781,8 +846,10 @@ function PlaygroundTab({ habits }) {
     function onMove(ev) {
       const now = performance.now();
       const dt = Math.max(1, now - lastT);
-      vx = ((ev.clientX - lastX) / dt) * 16;
-      vy = ((ev.clientY - lastY) / dt) * 16;
+      const rawVx = ((ev.clientX - lastX) / dt) * THROW_POWER;
+      const rawVy = ((ev.clientY - lastY) / dt) * THROW_POWER;
+      vx = Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, rawVx));
+      vy = Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, rawVy));
       lastX = ev.clientX; lastY = ev.clientY; lastT = now;
 
       const nx = ev.clientX - rect.left - offsetX;
@@ -843,7 +910,7 @@ function PlaygroundTab({ habits }) {
               className="absolute select-none"
               style={{ width: CREATURE_SIZE, height: CREATURE_SIZE, cursor: 'grab', touchAction: 'none', willChange: 'transform' }}
             >
-              <Creature stage={stats.stage} condition={stats.condition} color={h.color} size={CREATURE_SIZE} />
+              <Creature stage={stats.stage} condition={stats.condition} color={h.color} theme={h.theme} size={CREATURE_SIZE} />
             </div>
           );
         })}
@@ -878,6 +945,7 @@ function FormModal({ initial, onSave, onClose }) {
   const [name, setName] = useState(initial?.name || '');
   const [icon, setIcon] = useState(initial?.icon || ICON_PRESETS[0]);
   const [color, setColor] = useState(initial?.color || COLOR_PRESETS[0]);
+  const [theme, setTheme] = useState(initial?.theme || 'default');
   const canSave = name.trim().length > 0;
 
   return (
@@ -893,7 +961,7 @@ function FormModal({ initial, onSave, onClose }) {
       />
 
       <label className="text-xs text-slate-400 block mb-1.5">キャラのアイコン</label>
-      <div className="grid grid-cols-6 gap-2 mb-4">
+      <div className="grid grid-cols-6 gap-2 mb-2">
         {ICON_PRESETS.map((ic) => (
           <button
             key={ic}
@@ -905,9 +973,19 @@ function FormModal({ initial, onSave, onClose }) {
           </button>
         ))}
       </div>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs text-slate-500">その他:</span>
+        <input
+          value={icon}
+          onChange={(e) => setIcon(e.target.value.slice(0, 4))}
+          placeholder="絵文字を入力"
+          className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-sm outline-none focus:border-cyan-400"
+        />
+        <span className="text-xs text-slate-600">(スマホのキーボードの絵文字一覧から選べます)</span>
+      </div>
 
       <label className="text-xs text-slate-400 block mb-1.5">テーマカラー</label>
-      <div className="flex gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-6">
         {COLOR_PRESETS.map((c) => (
           <button
             key={c}
@@ -916,10 +994,35 @@ function FormModal({ initial, onSave, onClose }) {
             style={{ backgroundColor: c, borderColor: color === c ? '#ffffff' : 'transparent' }}
           />
         ))}
+        <label className="w-9 h-9 rounded-full border-2 border-dashed border-slate-600 flex items-center justify-center relative overflow-hidden cursor-pointer">
+          <span className="text-slate-500 text-xs">+</span>
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+            title="好きな色を選ぶ"
+          />
+        </label>
+      </div>
+
+      <label className="text-xs text-slate-400 block mb-1.5">キャラのタイプ(育ち方の系統)</label>
+      <div className="grid grid-cols-3 gap-2 mb-6">
+        {THEMES.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTheme(t.key)}
+            className="py-2 rounded-xl flex flex-col items-center justify-center gap-1 border-2 text-xs"
+            style={{ borderColor: theme === t.key ? color : '#334155', backgroundColor: theme === t.key ? '#0f172a' : 'transparent', color: theme === t.key ? '#e2e8f0' : '#64748b' }}
+          >
+            <span className="text-base">{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <button
-        onClick={() => canSave && onSave({ name: name.trim(), icon, color })}
+        onClick={() => canSave && onSave({ name: name.trim(), icon, color, theme })}
         className="w-full py-3 rounded-xl font-medium"
         style={{ backgroundColor: color, color: '#020617', opacity: canSave ? 1 : 0.4, pointerEvents: canSave ? 'auto' : 'none' }}
       >
@@ -937,7 +1040,7 @@ function DetailModal({ habit, onClose, onEdit, onDeleteRequest, onOpenStats }) {
       <div className="flex flex-col items-center text-center">
         <div className="relative w-36 h-36 flex items-center justify-center mb-3">
           <ExpRing exp={stats.exp} size={144} color={habit.color} />
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} size={88} />
+          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={88} />
         </div>
         <h2 className="text-xl font-bold text-slate-100" style={displayStyle}>{habit.icon} {habit.name}</h2>
         <div className="text-sm text-slate-400 mt-1">Lv.{stats.level} ・ {STAGE_NAMES[stats.stage]}</div>
@@ -979,6 +1082,48 @@ function DeleteConfirmModal({ habit, onConfirm, onClose }) {
       <div className="flex gap-3">
         <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300">キャンセル</button>
         <button onClick={() => onConfirm(habit.id)} className="flex-1 py-2.5 rounded-xl text-white" style={{ backgroundColor: '#e11d76' }}>削除する</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* 更新履歴。新しい変更を上に追記していく。日付は目安でよい。 */
+const CHANGELOG = [
+  { date: '2026-07', items: [
+    '習慣ごとにキャラのアイコン・色を自由入力できるように',
+    'キャラのタイプ(筋肉系/学習系/生活・休息系/クリエイティブ系)を選べるように。腕が生える段階からタイプ別の見た目に変化',
+    '7日連続ボーナスを、直近7日の◎の割合に応じて変動する方式に変更',
+    '「ひろば」の物理演算を調整(投げたときの初動を抑え、重さを感じられるように)',
+  ]},
+  { date: '2026-07', items: [
+    'Next.js + Supabaseで本番リリース(Googleログイン対応)',
+    '日記機能・全体振り返りカレンダー・ひろばを追加',
+  ]},
+];
+
+function HelpModal({ onClose }) {
+  return (
+    <ModalShell onClose={onClose}>
+      <h2 className="text-lg font-bold text-slate-100 mb-4" style={displayStyle}>使い方・お知らせ</h2>
+
+      <h3 className="text-sm font-medium text-slate-300 mb-2">使い方</h3>
+      <div className="space-y-2 text-sm text-slate-400 mb-6">
+        <p>毎日、習慣ごとに ◎○△× の4段階で記録します。◎かなりできた/○まぁできた/△少し触った/×できなかった、というニュアンスです。</p>
+        <p>記録に応じてキャラが育ちます(EXPが貯まるとレベルアップし、見た目が進化します)。×が続くとキャラが弱っていきます。</p>
+        <p>「カレンダー」タブでは、任意の日にひとことメモ(日記)を残せます。</p>
+        <p>「ひろば」タブでは、育てたキャラをつかんで投げて遊べます(ゲーム的な意味はありません)。</p>
+      </div>
+
+      <h3 className="text-sm font-medium text-slate-300 mb-2">更新履歴</h3>
+      <div className="space-y-3">
+        {CHANGELOG.map((entry, i) => (
+          <div key={i} className="text-sm">
+            <div className="text-xs text-slate-500 mb-1" style={monoStyle}>{entry.date}</div>
+            <ul className="text-slate-400 space-y-0.5 list-disc list-inside">
+              {entry.items.map((item, j) => <li key={j}>{item}</li>)}
+            </ul>
+          </div>
+        ))}
       </div>
     </ModalShell>
   );
@@ -1041,7 +1186,7 @@ export default function App({ userId }) {
   }
 
   function handleEditHabit(habitId, data) {
-    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color } : h)));
+    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme } : h)));
     updateHabitFields(habitId, data);
     setModal(null);
   }
@@ -1062,6 +1207,13 @@ export default function App({ userId }) {
 
   return (
     <div className="min-h-screen bg-slate-950" style={{ fontFamily: 'var(--font-noto-sans-jp), sans-serif' }}>
+      <button
+        onClick={() => setModal({ type: 'help' })}
+        className="fixed top-3 right-14 z-40 w-9 h-9 rounded-full flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-500"
+        title="使い方・お知らせ"
+      >
+        <HelpCircle size={16} />
+      </button>
       <button
         onClick={handleSignOut}
         className="fixed top-3 right-3 z-40 w-9 h-9 rounded-full flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-500"
@@ -1141,6 +1293,7 @@ export default function App({ userId }) {
         />
       )}
       {modal?.type === 'delete' && <DeleteConfirmModal habit={modal.habit} onConfirm={handleDeleteHabit} onClose={() => setModal(null)} />}
+      {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal?.type === 'stats' && currentStatsHabit && (
         <StatsView habit={currentStatsHabit} onClose={() => setModal({ type: 'detail', habit: currentStatsHabit })} />
       )}
