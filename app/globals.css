@@ -6,3 +6,37 @@ body {
   font-family: var(--font-noto-sans-jp), sans-serif;
 }
 
+/* 進化演出(レベルアップして進化段階が上がった瞬間の演出)用アニメーション */
+@keyframes evoFlash {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(2.4); }
+}
+.animate-evoFlash {
+  animation: evoFlash 0.3s ease-in-out infinite;
+}
+
+@keyframes evoPopIn {
+  0% { transform: scale(0.2) rotate(-10deg); opacity: 0; }
+  55% { transform: scale(1.18) rotate(4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.animate-evoPopIn {
+  animation: evoPopIn 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes evoTextIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-evoTextIn {
+  animation: evoTextIn 0.5s ease-out both;
+}
+
+@keyframes evoBurst {
+  0% { transform: scale(0.3); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+.animate-evoBurst {
+  animation: evoBurst 0.9s ease-out both;
+}
+

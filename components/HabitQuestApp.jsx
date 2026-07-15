@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Check, X, Trash2, Edit3, Home as HomeIcon, BookOpen, Flame, Sparkles,
-  ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut, HelpCircle,
+  ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut, HelpCircle, StickyNote,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
@@ -126,7 +126,9 @@ function ThemeAccessory({ theme, bodyR }) {
 function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
   const isDown = condition === 'down';
   const isGreat = condition === 'great';
-  const bodyR = 20 + stage * 3;
+  // 段階が上がるほど大きく育つ(たまご:20 → 完全体:55.5)。viewBoxも合わせて広げてあるので、
+  // 終盤の大きな体や翼が枠外に切れないようになっている。
+  const bodyR = 20 + stage * 3.5;
   const wobble = isDown ? 'rotate(14deg)' : 'rotate(0deg)';
   const filterStyle = isDown
     ? 'grayscale(0.6) brightness(0.75)'
@@ -134,28 +136,47 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
     ? `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color})`
     : `drop-shadow(0 0 3px ${color}88)`;
 
-  /* 段階が上がるごとに見た目のパーツが増えていく(脚→腕→トゲ→翼→マント→王冠)。
+  /* 段階が上がるごとに見た目のパーツが増えていく(脚→腕→トゲ→翼→マント→オーラ粒子→王冠)。
      テーマ別のアクセサリーは腕が生える段階(stage>=3)からあわせて表示する。 */
   const hasLegs = stage >= 2;
   const hasArms = stage >= 3;
-  const spikeCount = stage >= 4 ? Math.min(5, stage - 3) : 0;
-  const hasWings = stage >= 5;
-  const hasCape = stage >= 6;
-  const hasCrown = stage >= 7;
+  const spikeCount = stage >= 4 ? Math.min(6, stage - 3) : 0;
+  const hasWings = stage >= 6;
+  const hasCape = stage >= 7;
+  const hasParticles = stage >= 8;
+  const hasCrown = stage >= 9;
 
   return (
-    <svg viewBox="0 0 100 100" width={size} height={size} style={{ transform: wobble, filter: filterStyle, transition: 'all 0.4s ease' }}>
+    <svg viewBox="-25 -25 150 150" width={size} height={size} style={{ transform: wobble, filter: filterStyle, transition: 'all 0.4s ease' }}>
       <ellipse cx="50" cy="88" rx={bodyR * 0.7} ry="5" fill="#000" opacity="0.35" />
 
-      {hasCrown && (
-        <circle cx="50" cy="50" r={bodyR + 12} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5">
-          <animate attributeName="r" values={`${bodyR + 10};${bodyR + 15};${bodyR + 10}`} dur="2.5s" repeatCount="indefinite" />
+      {(hasParticles || hasCrown) && (
+        <circle cx="50" cy="50" r={bodyR + (hasCrown ? 16 : 10)} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5">
+          <animate
+            attributeName="r"
+            values={hasCrown ? `${bodyR + 13};${bodyR + 19};${bodyR + 13}` : `${bodyR + 7};${bodyR + 12};${bodyR + 7}`}
+            dur="2.5s"
+            repeatCount="indefinite"
+          />
         </circle>
       )}
 
+      {hasParticles &&
+        Array.from({ length: 6 }).map((_, i) => {
+          const angle = (i / 6) * 360 * (Math.PI / 180);
+          const r = bodyR + 20;
+          const px = 50 + Math.cos(angle) * r;
+          const py = 50 + Math.sin(angle) * r;
+          return (
+            <circle key={i} cx={px} cy={py} r="2.2" fill={color} opacity="0.8">
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" begin={`${i * 0.3}s`} repeatCount="indefinite" />
+            </circle>
+          );
+        })}
+
       {hasCape && (
         <path
-          d={`M${50 - bodyR * 0.5},${48} Q${50 - bodyR - 12},${68} ${50 - bodyR * 0.3},${82} Q${50 - bodyR * 0.6},${64} ${50 - bodyR * 0.4},${48} Z`}
+          d={`M${50 - bodyR * 0.5},${48} Q${50 - bodyR - 16},${70} ${50 - bodyR * 0.3},${86} Q${50 - bodyR * 0.6},${68} ${50 - bodyR * 0.4},${48} Z`}
           fill={color}
           opacity="0.5"
         />
@@ -169,12 +190,12 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
       )}
 
       {Array.from({ length: spikeCount }).map((_, i, arr) => {
-        const angle = (-90 + (i - (arr.length - 1) / 2) * 22) * (Math.PI / 180);
+        const angle = (-90 + (i - (arr.length - 1) / 2) * 20) * (Math.PI / 180);
         const x1 = 50 + Math.cos(angle) * (bodyR - 4);
         const y1 = 50 + Math.sin(angle) * (bodyR - 4);
-        const x2 = 50 + Math.cos(angle) * (bodyR + 10);
-        const y2 = 50 + Math.sin(angle) * (bodyR + 10);
-        return <polygon key={i} points={`${x1 - 3},${y1} ${x1 + 3},${y1} ${x2},${y2}`} fill={color} />;
+        const x2 = 50 + Math.cos(angle) * (bodyR + 12);
+        const y2 = 50 + Math.sin(angle) * (bodyR + 12);
+        return <polygon key={i} points={`${x1 - 3.5},${y1} ${x1 + 3.5},${y1} ${x2},${y2}`} fill={color} />;
       })}
 
       {stage === 0 ? (
@@ -188,21 +209,21 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
 
       {hasArms && (
         <>
-          <ellipse cx={50 - bodyR - 3} cy="48" rx="6" ry="10" fill={color} opacity="0.85" />
-          <ellipse cx={50 + bodyR + 3} cy="48" rx="6" ry="10" fill={color} opacity="0.85" />
+          <ellipse cx={50 - bodyR - 3} cy="48" rx={6 + stage * 0.3} ry={10 + stage * 0.4} fill={color} opacity="0.85" />
+          <ellipse cx={50 + bodyR + 3} cy="48" rx={6 + stage * 0.3} ry={10 + stage * 0.4} fill={color} opacity="0.85" />
         </>
       )}
 
       {hasWings && (
         <>
-          <ellipse cx={50 - bodyR - 10} cy="44" rx="9" ry="16" fill={color} opacity="0.6" />
-          <ellipse cx={50 + bodyR + 10} cy="44" rx="9" ry="16" fill={color} opacity="0.6" />
+          <ellipse cx={50 - bodyR - 12} cy="42" rx={10 + stage * 0.6} ry={18 + stage} fill={color} opacity="0.6" />
+          <ellipse cx={50 + bodyR + 12} cy="42" rx={10 + stage * 0.6} ry={18 + stage} fill={color} opacity="0.6" />
         </>
       )}
 
       {hasCrown && (
         <polygon
-          points={`${50 - 10},${52 - bodyR - 2} ${50 - 5},${52 - bodyR - 10} ${50},${52 - bodyR - 2} ${50 + 5},${52 - bodyR - 10} ${50 + 10},${52 - bodyR - 2}`}
+          points={`${50 - 13},${52 - bodyR - 3} ${50 - 6.5},${52 - bodyR - 14} ${50},${52 - bodyR - 3} ${50 + 6.5},${52 - bodyR - 14} ${50 + 13},${52 - bodyR - 3}`}
           fill="#fbbf24"
         />
       )}
@@ -385,9 +406,10 @@ function EmptyState({ onOpenAdd, onSeedDemo }) {
   );
 }
 
-function HabitRow({ habit, onSetToday, onOpenDetail }) {
+function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
   const stats = computeStats(habit);
   const today = stats.todayStatus;
+  const hasTodayNote = Boolean(habit.notes && habit.notes[todayStr()]);
   const orderedLevels = [...CHECK_LEVELS].reverse(); // full → good → partial → none
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
@@ -405,6 +427,14 @@ function HabitRow({ habit, onSetToday, onOpenDetail }) {
             <span className="mx-1">・</span>
             <span>Lv.{stats.level}</span>
           </div>
+        </button>
+        <button
+          onClick={() => onOpenNote(habit)}
+          className="relative flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-slate-500"
+          title="今日のメモ"
+        >
+          <StickyNote size={16} />
+          {hasTodayNote && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />}
         </button>
       </div>
       <div className="grid grid-cols-4 gap-1.5 mt-3">
@@ -433,7 +463,7 @@ function HabitRow({ habit, onSetToday, onOpenDetail }) {
   );
 }
 
-function HomeTab({ habits, onSetToday, onOpenDetail, onOpenAdd, onSeedDemo }) {
+function HomeTab({ habits, onSetToday, onOpenDetail, onOpenAdd, onSeedDemo, onOpenNote }) {
   const formattedToday = new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date());
   return (
     <div className="p-4 md:p-8 max-w-2xl mx-auto">
@@ -454,7 +484,7 @@ function HomeTab({ habits, onSetToday, onOpenDetail, onOpenAdd, onSeedDemo }) {
         <EmptyState onOpenAdd={onOpenAdd} onSeedDemo={onSeedDemo} />
       ) : (
         <div className="space-y-3">
-          {habits.map((h) => <HabitRow key={h.id} habit={h} onSetToday={onSetToday} onOpenDetail={onOpenDetail} />)}
+          {habits.map((h) => <HabitRow key={h.id} habit={h} onSetToday={onSetToday} onOpenDetail={onOpenDetail} onOpenNote={onOpenNote} />)}
         </div>
       )}
     </div>
@@ -1090,6 +1120,11 @@ function DeleteConfirmModal({ habit, onConfirm, onClose }) {
 /* 更新履歴。新しい変更を上に追記していく。日付は目安でよい。 */
 const CHANGELOG = [
   { date: '2026-07', items: [
+    '進化段階を8→10段階に拡張。サイズや見た目の変化をより大きく・派手に',
+    '段階が上がった瞬間に進化演出(フルスクリーンでキャラが光って生まれ変わる)が出るように',
+    'ホーム画面の各習慣にも、その場でメモを残せるボタンを追加',
+  ]},
+  { date: '2026-07', items: [
     '習慣ごとにキャラのアイコン・色を自由入力できるように',
     'キャラのタイプ(筋肉系/学習系/生活・休息系/クリエイティブ系)を選べるように。腕が生える段階からタイプ別の見た目に変化',
     '7日連続ボーナスを、直近7日の◎の割合に応じて変動する方式に変更',
@@ -1129,6 +1164,89 @@ function HelpModal({ onClose }) {
   );
 }
 
+function QuickNoteModal({ habit, onClose, onUpdateNote }) {
+  const [text, setText] = useState((habit.notes && habit.notes[todayStr()]) || '');
+  return (
+    <ModalShell onClose={onClose}>
+      <h2 className="text-lg font-bold text-slate-100 mb-1" style={displayStyle}>{habit.icon} {habit.name}</h2>
+      <p className="text-xs text-slate-500 mb-4">今日のひとことメモ</p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value.slice(0, 200))}
+        placeholder="今日はどうだった?"
+        rows={4}
+        autoFocus
+        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-cyan-400 mb-4"
+      />
+      <button
+        onClick={() => { onUpdateNote(habit.id, todayStr(), text); onClose(); }}
+        className="w-full py-3 rounded-xl font-medium"
+        style={{ backgroundColor: habit.color, color: '#020617' }}
+      >
+        保存する
+      </button>
+    </ModalShell>
+  );
+}
+
+/* ============================================================
+   進化演出(ポケモンの進化のような、段階が上がった瞬間の演出)
+   ============================================================ */
+function EvolutionCelebration({ habit, fromStage, toStage, onClose }) {
+  const [phase, setPhase] = useState('flash'); // flash → whiteout → reveal
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase('whiteout'), 900);
+    const t2 = setTimeout(() => setPhase('reveal'), 1080);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center" style={{ backgroundColor: phase === 'whiteout' ? '#ffffff' : '#020617', transition: 'background-color 0.15s ease' }}>
+      {phase !== 'whiteout' && (
+        <div className="text-center px-6 w-full max-w-sm">
+          <div className="text-sm text-slate-500 mb-8" style={monoStyle}>{habit.icon} {habit.name}</div>
+
+          <div className="relative flex items-center justify-center mb-4" style={{ height: 190 }}>
+            {phase === 'reveal' && (
+              <div
+                className="absolute rounded-full animate-evoBurst"
+                style={{ width: 140, height: 140, background: `radial-gradient(circle, ${habit.color}55 0%, transparent 70%)` }}
+              />
+            )}
+            {phase === 'flash' ? (
+              <div className="animate-evoFlash">
+                <Creature stage={fromStage} condition="normal" color={habit.color} theme={habit.theme} size={140} />
+              </div>
+            ) : (
+              <div className="animate-evoPopIn">
+                <Creature stage={toStage} condition="great" color={habit.color} theme={habit.theme} size={180} />
+              </div>
+            )}
+          </div>
+
+          {phase === 'reveal' && (
+            <div className="animate-evoTextIn">
+              <div className="text-xs text-slate-500 mb-1" style={monoStyle}>Lv.UP</div>
+              <div className="text-xl font-bold text-slate-100 mb-1" style={displayStyle}>
+                {STAGE_NAMES[toStage]}に進化した!
+              </div>
+              <div className="text-sm text-slate-400 mb-8">{habit.name}が新しい姿を手に入れた</div>
+              <button
+                onClick={onClose}
+                className="px-8 py-2.5 rounded-xl font-medium"
+                style={{ backgroundColor: habit.color, color: '#020617' }}
+              >
+                とじる
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================
    メインアプリ
    ============================================================ */
@@ -1137,6 +1255,7 @@ export default function App({ userId }) {
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState('home');
   const [modal, setModal] = useState(null);
+  const [evolution, setEvolution] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -1157,15 +1276,23 @@ export default function App({ userId }) {
   // 楽観的更新: 先に画面上のstateを更新して即座に反映し、そのあとDBへ書き込む。
   // DB書き込みが多少遅れても操作感が損なわれないようにするため。
   function handleSetToday(habitId, status) {
-    setHabits((prev) => prev.map((h) => {
-      if (h.id !== habitId) return h;
-      const current = h.logs[todayStr()];
-      const newLogs = { ...h.logs };
-      if (current === status) delete newLogs[todayStr()];
-      else newLogs[todayStr()] = status;
-      saveLogs(habitId, newLogs);
-      return { ...h, logs: newLogs };
-    }));
+    const target = habits.find((h) => h.id === habitId);
+    if (!target) return;
+    const current = target.logs[todayStr()];
+    const newLogs = { ...target.logs };
+    if (current === status) delete newLogs[todayStr()];
+    else newLogs[todayStr()] = status;
+
+    const prevStats = computeStats(target);
+    const updatedHabit = { ...target, logs: newLogs };
+    const nextStats = computeStats(updatedHabit);
+
+    setHabits((prev) => prev.map((h) => (h.id === habitId ? updatedHabit : h)));
+    saveLogs(habitId, newLogs);
+
+    if (nextStats.stage > prevStats.stage) {
+      setEvolution({ habit: updatedHabit, fromStage: prevStats.stage, toStage: nextStats.stage });
+    }
   }
 
   async function handleAddHabit(data) {
@@ -1204,6 +1331,7 @@ export default function App({ userId }) {
 
   const currentDetailHabit = modal?.type === 'detail' ? habits.find((h) => h.id === modal.habit.id) || modal.habit : null;
   const currentStatsHabit = modal?.type === 'stats' ? habits.find((h) => h.id === modal.habit.id) || modal.habit : null;
+  const currentNoteHabit = modal?.type === 'note' ? habits.find((h) => h.id === modal.habit.id) || modal.habit : null;
 
   return (
     <div className="min-h-screen bg-slate-950" style={{ fontFamily: 'var(--font-noto-sans-jp), sans-serif' }}>
@@ -1252,6 +1380,7 @@ export default function App({ userId }) {
               onOpenDetail={(h) => setModal({ type: 'detail', habit: h })}
               onOpenAdd={() => setModal({ type: 'add' })}
               onSeedDemo={handleSeedDemo}
+              onOpenNote={(h) => setModal({ type: 'note', habit: h })}
             />
           ) : tab === 'gallery' ? (
             <GalleryTab habits={habits} onOpenDetail={(h) => setModal({ type: 'detail', habit: h })} />
@@ -1294,8 +1423,19 @@ export default function App({ userId }) {
       )}
       {modal?.type === 'delete' && <DeleteConfirmModal habit={modal.habit} onConfirm={handleDeleteHabit} onClose={() => setModal(null)} />}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
+      {modal?.type === 'note' && currentNoteHabit && (
+        <QuickNoteModal habit={currentNoteHabit} onClose={() => setModal(null)} onUpdateNote={handleUpdateNote} />
+      )}
       {modal?.type === 'stats' && currentStatsHabit && (
         <StatsView habit={currentStatsHabit} onClose={() => setModal({ type: 'detail', habit: currentStatsHabit })} />
+      )}
+      {evolution && (
+        <EvolutionCelebration
+          habit={evolution.habit}
+          fromStage={evolution.fromStage}
+          toStage={evolution.toStage}
+          onClose={() => setEvolution(null)}
+        />
       )}
     </div>
   );
