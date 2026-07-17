@@ -14,7 +14,7 @@ import {
   levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS, THEMES, ECONOMY,
   QUEST_BALANCE, SPECIAL_ATTACKS, WORLD_1_STAGES, creatureBattleStats, questCoinReward,
   displayStyle, monoStyle, todayStr, genId, getSyncedLogs, computeStats, computeStatsAsOf,
-  weeklyAggregation, monthlyAggregation, seedDemoData,
+  weeklyAggregation, monthlyAggregation, seedDemoData, isDueDate, daysUntilNextDue,
 } from '@/lib/gameLogic';
 import {
   loadHabits, addHabit as apiAddHabit, seedHabits, updateHabitFields, deleteHabit as apiDeleteHabit,
@@ -158,12 +158,13 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
     : `drop-shadow(0 0 3px ${color}88)`;
 
   /* 段階が上がるごとに見た目のパーツが増えていく。
-     脚→腕+しっぽ→トゲ→お腹の模様→翼→マント+ツノ→オーラ粒子→王冠+二重オーラ(完全体のみ) */
+     耳→脚→腕+しっぽ→トゲ→お腹の模様→翼→マント+ツノ→オーラ粒子→王冠+二重オーラ(完全体のみ) */
+  const hasEars = stage >= 1;
   const hasLegs = stage >= 2;
   const hasArms = stage >= 3;
   const hasTail = stage >= 3;
   const spikeCount = stage >= 4 ? Math.min(6, stage - 3) : 0;
-  const hasBelly = stage >= 5;
+  const hasBelly = stage >= 4;
   const hasWings = stage >= 6;
   const hasCape = stage >= 7;
   const hasHorns = stage >= 7;
@@ -254,6 +255,13 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
         </>
       ) : (
         <circle cx="50" cy="52" r={bodyR} fill={color} />
+      )}
+
+      {hasEars && (
+        <>
+          <circle cx={50 - bodyR * 0.55} cy={52 - bodyR * 0.85} r={bodyR * 0.28} fill={color} />
+          <circle cx={50 + bodyR * 0.55} cy={52 - bodyR * 0.85} r={bodyR * 0.28} fill={color} />
+        </>
       )}
 
       {hasBelly && <ellipse cx="50" cy={52 + bodyR * 0.25} rx={bodyR * 0.45} ry={bodyR * 0.55} fill="#ffffff" opacity="0.22" />}
@@ -354,7 +362,7 @@ function EvolutionGallery({ habit }) {
         if (cutoff < habit.createdAt) {
           return (
             <div key={p.label} className="flex flex-col items-center gap-1 flex-1">
-              <div className="w-14 h-14 rounded-full border-2 border-dashed border-slate-700" />
+              <div className="w-20 h-20 rounded-full border-2 border-dashed border-slate-700" />
               <span className="text-xs text-slate-600">記録前</span>
             </div>
           );
@@ -362,7 +370,7 @@ function EvolutionGallery({ habit }) {
         const s = computeStatsAsOf(habit, cutoff);
         return (
           <div key={p.label} className="flex flex-col items-center gap-1 flex-1">
-            <Creature stage={s.stage} condition={s.condition} color={habit.color} theme={habit.theme} size={56} />
+            <Creature stage={s.stage} condition={s.condition} color={habit.color} theme={habit.theme} size={84} />
             <span className="text-xs text-slate-500">{p.label}</span>
             <span className="text-xs" style={monoStyle}>Lv.{s.level}</span>
           </div>
@@ -445,7 +453,7 @@ function NavButton({ active, onClick, icon, label }) {
 function EmptyState({ onOpenAdd, onSeedDemo }) {
   return (
     <div className="text-center py-16 border border-dashed border-slate-800 rounded-2xl">
-      <div className="flex justify-center mb-4"><Creature stage={0} condition="normal" color="#22e2ff" size={72} /></div>
+      <div className="flex justify-center mb-4"><Creature stage={0} condition="normal" color="#22e2ff" size={120} /></div>
       <p className="text-slate-400 mb-6 text-sm">まだ習慣が登録されていません。<br />最初の一歩を記録して、キャラを孵化させましょう。</p>
       <div className="flex flex-col items-center gap-3">
         <button onClick={onOpenAdd} className="px-5 py-2.5 rounded-xl font-medium" style={{ backgroundColor: '#22e2ff', color: '#020617' }}>
@@ -503,6 +511,8 @@ function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
   const orderedLevels = [...CHECK_LEVELS].reverse(); // full → good → partial → none
   const [popup, setPopup] = useState(null);
   const [reaction, setReaction] = useState(null); // 'good' | 'bad' | null
+  const isDueToday = isDueDate(habit, todayStr());
+  const nextIn = isDueToday ? 0 : daysUntilNextDue(habit);
 
   function handleLevelClick(lvlKey) {
     const currentStatus = habit.logs[todayStr()];
@@ -533,9 +543,9 @@ function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
       <div className="flex items-center gap-3">
-        <button onClick={() => onOpenDetail(habit)} className="relative flex-shrink-0 w-14 h-14 flex items-center justify-center" style={{ overflow: 'visible' }}>
+        <button onClick={() => onOpenDetail(habit)} className="relative flex-shrink-0 w-20 h-20 flex items-center justify-center" style={{ overflow: 'visible' }}>
           <div className={reaction === 'good' ? 'animate-checkBounce' : reaction === 'bad' ? 'animate-checkShake' : ''}>
-            <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={48} />
+            <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={80} />
           </div>
           {popup && (
             <span
@@ -550,10 +560,13 @@ function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
         <button onClick={() => onOpenDetail(habit)} className="flex-1 min-w-0 text-left">
           <div className="text-slate-100 font-medium truncate flex items-center gap-1.5">
             <span>{habit.icon}</span><span>{habit.name}</span>
+            {habit.frequencyDays > 1 && (
+              <span className="text-xs text-slate-500 font-normal">({habit.frequencyDays}日ごと)</span>
+            )}
           </div>
           <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
             <Flame size={12} className={stats.streak > 0 ? 'text-amber-400' : 'text-slate-600'} />
-            <span style={monoStyle}>{stats.streak}日連続</span>
+            <span style={monoStyle}>{stats.streak}回連続</span>
             <span className="mx-1">・</span>
             <span>Lv.{stats.level}</span>
           </div>
@@ -567,28 +580,34 @@ function HabitRow({ habit, onSetToday, onOpenDetail, onOpenNote }) {
           {hasTodayNote && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />}
         </button>
       </div>
-      <div className="grid grid-cols-4 gap-1.5 mt-3">
-        {orderedLevels.map((lvl) => {
-          const isSelected = today === lvl.key;
-          return (
-            <button
-              key={lvl.key}
-              onClick={() => handleLevelClick(lvl.key)}
-              className="h-11 rounded-lg flex items-center justify-center text-lg font-medium transition-transform active:scale-90"
-              style={{
-                ...levelStyle(lvl.key, habit.color),
-                color: LEVEL_TEXT_COLOR[lvl.key],
-                outline: isSelected ? `2px solid ${habit.color}` : 'none',
-                outlineOffset: '1px',
-                opacity: isSelected || today === undefined ? 1 : 0.5,
-              }}
-              title={lvl.label}
-            >
-              {LEVEL_SYMBOL[lvl.key]}
-            </button>
-          );
-        })}
-      </div>
+      {isDueToday ? (
+        <div className="grid grid-cols-4 gap-1.5 mt-3">
+          {orderedLevels.map((lvl) => {
+            const isSelected = today === lvl.key;
+            return (
+              <button
+                key={lvl.key}
+                onClick={() => handleLevelClick(lvl.key)}
+                className="h-11 rounded-lg flex items-center justify-center text-lg font-medium transition-transform active:scale-90"
+                style={{
+                  ...levelStyle(lvl.key, habit.color),
+                  color: LEVEL_TEXT_COLOR[lvl.key],
+                  outline: isSelected ? `2px solid ${habit.color}` : 'none',
+                  outlineOffset: '1px',
+                  opacity: isSelected || today === undefined ? 1 : 0.5,
+                }}
+                title={lvl.label}
+              >
+                {LEVEL_SYMBOL[lvl.key]}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-3 py-2.5 rounded-lg text-center text-xs text-slate-500 border border-dashed border-slate-800">
+          今日はお休み日です(次は{nextIn}日後)
+        </div>
+      )}
     </div>
   );
 }
@@ -634,7 +653,7 @@ function GalleryTab({ habits, onOpenDetail }) {
             const cond = CONDITION_LABEL[stats.condition];
             return (
               <button key={h.id} onClick={() => onOpenDetail(h)} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center gap-2 hover:border-slate-600 transition">
-                <Creature stage={stats.stage} condition={stats.condition} color={h.color} theme={h.theme} size={64} />
+                <Creature stage={stats.stage} condition={stats.condition} color={h.color} theme={h.theme} size={110} />
                 <div className="text-slate-100 text-sm font-medium truncate w-full text-center">{h.icon} {h.name}</div>
                 <div className="text-xs text-slate-500" style={monoStyle}>Lv.{stats.level} ・ {STAGE_NAMES[stats.stage]}</div>
                 <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: cond.color, border: `1px solid ${cond.color}` }}>{cond.text}</span>
@@ -681,7 +700,7 @@ function StatsView({ habit, onClose }) {
       <div className="sticky top-0 bg-slate-950 border-b border-slate-800 p-4 flex items-center gap-3 z-10">
         <button onClick={onClose} className="text-slate-400"><ChevronLeft size={22} /></button>
         <div className="flex items-center gap-2">
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={32} />
+          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={44} />
           <span className="text-slate-100 font-medium">{habit.icon} {habit.name}</span>
         </div>
       </div>
@@ -929,7 +948,7 @@ function PlaygroundTab({ habits }) {
   const containerRef = useRef(null);
   const bodiesRef = useRef({});
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
-  const CREATURE_SIZE = 64;
+  const CREATURE_SIZE = 110;
   // 物理演算の調整値。THROW_POWERを下げる/MAX_THROW_SPEEDを絞ると「軽くてすぐ飛んでいく」感じが弱まり、
   // GRAVITYを上げると落下が速くなって重量感が出る。
   const GRAVITY = 0.85;
@@ -1106,6 +1125,7 @@ function FormModal({ initial, onSave, onClose, coins, unlockedThemes, onUnlockTh
   const [icon, setIcon] = useState(initial?.icon || ICON_PRESETS[0]);
   const [color, setColor] = useState(initial?.color || COLOR_PRESETS[0]);
   const [theme, setTheme] = useState(initial?.theme || 'default');
+  const [frequencyDays, setFrequencyDays] = useState(initial?.frequencyDays || 1);
   const canSave = name.trim().length > 0;
 
   const themeChangeCount = initial?.themeChangeCount ?? 0;
@@ -1130,12 +1150,30 @@ function FormModal({ initial, onSave, onClose, coins, unlockedThemes, onUnlockTh
     if (!canSave) return;
     const themeChanged = Boolean(initial) && theme !== initial.theme;
     const nextThemeChangeCount = themeChanged ? themeChangeCount + 1 : themeChangeCount;
-    onSave({ name: name.trim(), icon, color, theme, themeChangeCount: nextThemeChangeCount });
+    onSave({ name: name.trim(), icon, color, theme, themeChangeCount: nextThemeChangeCount, frequencyDays });
   }
 
   return (
     <ModalShell onClose={onClose}>
       <h2 className="text-lg font-bold text-slate-100 mb-4" style={displayStyle}>{initial ? '習慣を編集' : '新しい習慣'}</h2>
+
+      <label className="text-xs text-slate-400 block mb-1.5">頻度</label>
+      <div className="grid grid-cols-4 gap-2 mb-6">
+        {[1, 2, 3, 7].map((n) => (
+          <button
+            key={n}
+            onClick={() => setFrequencyDays(n)}
+            className="py-2 rounded-xl text-xs border-2"
+            style={{
+              borderColor: frequencyDays === n ? color : '#334155',
+              backgroundColor: frequencyDays === n ? '#0f172a' : 'transparent',
+              color: frequencyDays === n ? '#e2e8f0' : '#64748b',
+            }}
+          >
+            {n === 1 ? '毎日' : n === 7 ? '週1' : `${n}日ごと`}
+          </button>
+        ))}
+      </div>
 
       <label className="text-xs text-slate-400 block mb-1.5">習慣の名前</label>
       <input
@@ -1249,9 +1287,9 @@ function DetailModal({ habit, onClose, onEdit, onDeleteRequest, onOpenStats }) {
   return (
     <ModalShell onClose={onClose}>
       <div className="flex flex-col items-center text-center">
-        <div className="relative w-36 h-36 flex items-center justify-center mb-3">
-          <ExpRing exp={stats.exp} size={144} color={habit.color} />
-          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={88} />
+        <div className="relative w-56 h-56 flex items-center justify-center mb-3">
+          <ExpRing exp={stats.exp} size={224} color={habit.color} />
+          <Creature stage={stats.stage} condition={stats.condition} color={habit.color} theme={habit.theme} size={160} />
         </div>
         <h2 className="text-xl font-bold text-slate-100" style={displayStyle}>{habit.icon} {habit.name}</h2>
         <div className="text-sm text-slate-400 mt-1">Lv.{stats.level} ・ {STAGE_NAMES[stats.stage]}</div>
@@ -1300,6 +1338,11 @@ function DeleteConfirmModal({ habit, onConfirm, onClose }) {
 
 /* 更新履歴。新しい変更を上に追記していく。日付は目安でよい。 */
 const CHANGELOG = [
+  { date: '2026-07', items: [
+    '「毎日」以外に「2日ごと/3日ごと/週1」の習慣も作れるように',
+    'キャラの見た目を全体的に大きく、耳などの新しいパーツも追加',
+    'コインの表示位置をサイドバーと被らない場所に移動',
+  ]},
   { date: '2026-07', items: [
     '「クエスト」タブを追加。育てたキャラでバトルできるように(ワールド1・全7ステージ)',
     'バトルは戦う/特殊攻撃/ガードの3コマンド、系統ごとに専用の特殊攻撃',
@@ -1405,7 +1448,7 @@ function EvolutionCelebration({ habit, fromStage, toStage, onClose }) {
         <div className="text-center px-6 w-full max-w-sm">
           <div className="text-sm text-slate-500 mb-8" style={monoStyle}>{habit.icon} {habit.name}</div>
 
-          <div className="relative flex items-center justify-center mb-4" style={{ height: 190 }}>
+          <div className="relative flex items-center justify-center mb-4" style={{ height: 280 }}>
             {phase === 'reveal' && (
               <div
                 className="absolute rounded-full animate-evoBurst"
@@ -1414,11 +1457,11 @@ function EvolutionCelebration({ habit, fromStage, toStage, onClose }) {
             )}
             {phase === 'flash' ? (
               <div className="animate-evoFlash">
-                <Creature stage={fromStage} condition="normal" color={habit.color} theme={habit.theme} size={140} />
+                <Creature stage={fromStage} condition="normal" color={habit.color} theme={habit.theme} size={200} />
               </div>
             ) : (
               <div className="animate-evoPopIn">
-                <Creature stage={toStage} condition="great" color={habit.color} theme={habit.theme} size={180} />
+                <Creature stage={toStage} condition="great" color={habit.color} theme={habit.theme} size={260} />
               </div>
             )}
           </div>
@@ -1561,7 +1604,7 @@ function BattleView({ habit, habitStats, worldIndex, stageData, onExit, onResult
 
         <div className="text-center">
           <div className="flex justify-center mb-2">
-            <Creature stage={habitStats.stage} condition={result === 'lose' ? 'down' : 'normal'} color={habit.color} theme={habit.theme} size={72} />
+            <Creature stage={habitStats.stage} condition={result === 'lose' ? 'down' : 'normal'} color={habit.color} theme={habit.theme} size={120} />
           </div>
           <div className="text-sm text-slate-300 mb-1">{habit.icon} {habit.name}</div>
           <div className="w-48 h-3 rounded-full bg-slate-800 overflow-hidden mx-auto mb-1">
@@ -1717,7 +1760,7 @@ function QuestTab({ habits, profile, onBattleResult }) {
                     className="w-full flex items-center gap-3 border border-slate-800 rounded-xl p-2.5"
                     style={{ opacity: blockedByStreak ? 0.4 : 1 }}
                   >
-                    <Creature stage={s.stage} condition={s.condition} color={h.color} theme={h.theme} size={40} />
+                    <Creature stage={s.stage} condition={s.condition} color={h.color} theme={h.theme} size={56} />
                     <div className="flex-1 min-w-0 text-left">
                       <div className="text-sm text-slate-200 truncate">{h.icon} {h.name}</div>
                       <div className="text-xs text-slate-500" style={monoStyle}>Lv.{s.level} ・ {s.streak}日連続</div>
@@ -1829,7 +1872,7 @@ export default function App({ userId }) {
   }
 
   function handleEditHabit(habitId, data) {
-    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme, themeChangeCount: data.themeChangeCount } : h)));
+    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme, themeChangeCount: data.themeChangeCount, frequencyDays: data.frequencyDays } : h)));
     updateHabitFields(habitId, data);
     setModal(null);
   }
@@ -1851,7 +1894,7 @@ export default function App({ userId }) {
 
   return (
     <div className="min-h-screen bg-slate-950" style={{ fontFamily: 'var(--font-noto-sans-jp), sans-serif' }}>
-      <div className="fixed top-3 left-3 z-40 flex items-center gap-1.5 px-3 h-9 rounded-full bg-slate-900 border border-slate-800 text-amber-400 text-sm" style={monoStyle}>
+      <div className="fixed bottom-20 md:bottom-3 right-3 z-40 flex items-center gap-1.5 px-3 h-9 rounded-full bg-slate-900 border border-slate-800 text-amber-400 text-sm" style={monoStyle}>
         <Coins size={14} />{profile.coins}
       </div>
       <button
