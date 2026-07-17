@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 import {
   Plus, Check, X, Trash2, Edit3, Home as HomeIcon, BookOpen, Flame, Sparkles,
   ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut, HelpCircle, StickyNote,
+  Coins, Lock, Swords, Shield, Zap, Skull, Trophy,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import {
   GAME_BALANCE, CHECK_LEVELS, LEVEL_SCORE, LEVEL_LABEL, LEVEL_SYMBOL, LEVEL_TEXT_COLOR,
-  levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS, THEMES,
+  levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS, THEMES, ECONOMY,
+  QUEST_BALANCE, SPECIAL_ATTACKS, WORLD_1_STAGES, creatureBattleStats, questCoinReward,
   displayStyle, monoStyle, todayStr, genId, getSyncedLogs, computeStats, computeStatsAsOf,
   weeklyAggregation, monthlyAggregation, seedDemoData,
 } from '@/lib/gameLogic';
@@ -18,6 +20,7 @@ import {
   loadHabits, addHabit as apiAddHabit, seedHabits, updateHabitFields, deleteHabit as apiDeleteHabit,
   saveLogs, saveNotes,
 } from '@/lib/habitsApi';
+import { loadProfile, addCoins, unlockTheme, recordQuestResult } from '@/lib/profileApi';
 
 /* ============================================================
    キャラクター SVG
@@ -120,15 +123,33 @@ function ThemeAccessory({ theme, bodyR }) {
       </g>
     );
   }
+  if (theme === 'beauty') {
+    // 美容系: 手鏡ときらめき
+    const hx = 50 + bodyR + 4;
+    const hy = 44;
+    return (
+      <g>
+        <ellipse cx={hx} cy={hy} rx="6.5" ry="8.5" fill="#e2e8f0" opacity="0.95" />
+        <ellipse cx={hx} cy={hy} rx="4.5" ry="6.5" fill="#ff8fc0" opacity="0.55" />
+        <rect x={hx - 1.3} y={hy + 7.5} width="2.6" height="7" rx="1.2" fill="#94a3b8" />
+        <path d={`M${hx + 8},${hy - 10} L${hx + 10},${hy - 7.5} L${hx + 8},${hy - 5} L${hx + 6},${hy - 7.5} Z`} fill="#fff9c4" opacity="0.9" />
+      </g>
+    );
+  }
   return null;
 }
+
+// 段階(0〜9)ごとの体の大きさ。単純な比例ではなく、後半ほど伸び幅が大きくなる
+// 加速カーブにしている(たまご:16 → 完全体:62、約3.9倍)。
+const BODY_RADII = [16, 19, 23, 27, 32, 37, 43, 49, 55, 62];
 
 function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
   const isDown = condition === 'down';
   const isGreat = condition === 'great';
-  // 段階が上がるほど大きく育つ(たまご:20 → 完全体:55.5)。viewBoxも合わせて広げてあるので、
-  // 終盤の大きな体や翼が枠外に切れないようになっている。
-  const bodyR = 20 + stage * 3.5;
+  const bodyR = BODY_RADII[stage] ?? BODY_RADII[BODY_RADII.length - 1];
+  // 翼やトゲなど「体の外に伸びるパーツ」は、bodyRをそのまま使うと巨大化したときに
+  // 画面外へはみ出すため、上限を設けた基準半径(accR)を別に用意して位置決めに使う。
+  const accR = Math.min(bodyR, 40);
   const wobble = isDown ? 'rotate(14deg)' : 'rotate(0deg)';
   const filterStyle = isDown
     ? 'grayscale(0.6) brightness(0.75)'
@@ -136,49 +157,70 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
     ? `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color})`
     : `drop-shadow(0 0 3px ${color}88)`;
 
-  /* 段階が上がるごとに見た目のパーツが増えていく(脚→腕→トゲ→翼→マント→オーラ粒子→王冠)。
-     テーマ別のアクセサリーは腕が生える段階(stage>=3)からあわせて表示する。 */
+  /* 段階が上がるごとに見た目のパーツが増えていく。
+     脚→腕+しっぽ→トゲ→お腹の模様→翼→マント+ツノ→オーラ粒子→王冠+二重オーラ(完全体のみ) */
   const hasLegs = stage >= 2;
   const hasArms = stage >= 3;
+  const hasTail = stage >= 3;
   const spikeCount = stage >= 4 ? Math.min(6, stage - 3) : 0;
+  const hasBelly = stage >= 5;
   const hasWings = stage >= 6;
   const hasCape = stage >= 7;
+  const hasHorns = stage >= 7;
   const hasParticles = stage >= 8;
-  const hasCrown = stage >= 9;
+  const isFinal = stage >= 9;
 
   return (
-    <svg viewBox="-25 -25 150 150" width={size} height={size} style={{ transform: wobble, filter: filterStyle, transition: 'all 0.4s ease' }}>
-      <ellipse cx="50" cy="88" rx={bodyR * 0.7} ry="5" fill="#000" opacity="0.35" />
+    <svg viewBox="-35 -35 170 170" width={size} height={size} style={{ transform: wobble, filter: filterStyle, transition: 'all 0.4s ease' }}>
+      <ellipse cx="50" cy="90" rx={bodyR * 0.7} ry="5" fill="#000" opacity="0.35" />
 
-      {(hasParticles || hasCrown) && (
-        <circle cx="50" cy="50" r={bodyR + (hasCrown ? 16 : 10)} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5">
-          <animate
-            attributeName="r"
-            values={hasCrown ? `${bodyR + 13};${bodyR + 19};${bodyR + 13}` : `${bodyR + 7};${bodyR + 12};${bodyR + 7}`}
-            dur="2.5s"
-            repeatCount="indefinite"
-          />
-        </circle>
+      {(hasParticles || isFinal) && (
+        <>
+          <circle cx="50" cy="50" r={accR + (isFinal ? 18 : 11)} fill="none" stroke={color} strokeWidth="1.5" opacity="0.5">
+            <animate
+              attributeName="r"
+              values={isFinal ? `${accR + 15};${accR + 21};${accR + 15}` : `${accR + 8};${accR + 13};${accR + 8}`}
+              dur="2.5s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {isFinal && (
+            <circle cx="50" cy="50" r={accR + 26} fill="none" stroke={color} strokeWidth="1" opacity="0.3">
+              <animate attributeName="r" values={`${accR + 24};${accR + 30};${accR + 24}`} dur="3.2s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </>
       )}
 
       {hasParticles &&
-        Array.from({ length: 6 }).map((_, i) => {
-          const angle = (i / 6) * 360 * (Math.PI / 180);
-          const r = bodyR + 20;
+        Array.from({ length: isFinal ? 8 : 6 }).map((_, i, arr) => {
+          const angle = (i / arr.length) * 360 * (Math.PI / 180);
+          const r = accR + 22;
           const px = 50 + Math.cos(angle) * r;
           const py = 50 + Math.sin(angle) * r;
           return (
-            <circle key={i} cx={px} cy={py} r="2.2" fill={color} opacity="0.8">
-              <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" begin={`${i * 0.3}s`} repeatCount="indefinite" />
+            <circle key={i} cx={px} cy={py} r={isFinal ? 2.6 : 2.2} fill={isFinal ? '#fbbf24' : color} opacity="0.8">
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="1.8s" begin={`${i * 0.25}s`} repeatCount="indefinite" />
             </circle>
           );
         })}
 
       {hasCape && (
         <path
-          d={`M${50 - bodyR * 0.5},${48} Q${50 - bodyR - 16},${70} ${50 - bodyR * 0.3},${86} Q${50 - bodyR * 0.6},${68} ${50 - bodyR * 0.4},${48} Z`}
+          d={`M${50 - bodyR * 0.5},${48} Q${50 - accR - 20},${72} ${50 - bodyR * 0.3},${92} Q${50 - bodyR * 0.6},${70} ${50 - bodyR * 0.4},${48} Z`}
           fill={color}
           opacity="0.5"
+        />
+      )}
+
+      {hasTail && (
+        <path
+          d={`M${50 + bodyR * 0.35},${50 + bodyR * 0.6} Q${50 + accR * 1.1},${50 + accR * 0.9} ${50 + accR * 0.75},${50 + accR * 1.3}`}
+          stroke={color}
+          strokeWidth={4 + stage * 0.3}
+          fill="none"
+          strokeLinecap="round"
+          opacity="0.9"
         />
       )}
 
@@ -191,12 +233,19 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
 
       {Array.from({ length: spikeCount }).map((_, i, arr) => {
         const angle = (-90 + (i - (arr.length - 1) / 2) * 20) * (Math.PI / 180);
-        const x1 = 50 + Math.cos(angle) * (bodyR - 4);
-        const y1 = 50 + Math.sin(angle) * (bodyR - 4);
-        const x2 = 50 + Math.cos(angle) * (bodyR + 12);
-        const y2 = 50 + Math.sin(angle) * (bodyR + 12);
-        return <polygon key={i} points={`${x1 - 3.5},${y1} ${x1 + 3.5},${y1} ${x2},${y2}`} fill={color} />;
+        const x1 = 50 + Math.cos(angle) * (accR - 4);
+        const y1 = 50 + Math.sin(angle) * (accR - 4);
+        const x2 = 50 + Math.cos(angle) * (accR + 15);
+        const y2 = 50 + Math.sin(angle) * (accR + 15);
+        return <polygon key={i} points={`${x1 - 4},${y1} ${x1 + 4},${y1} ${x2},${y2}`} fill={color} />;
       })}
+
+      {hasHorns && (
+        <>
+          <polygon points={`${50 - accR * 0.55},${52 - bodyR * 0.75} ${50 - accR * 0.75},${52 - bodyR * 1.05} ${50 - accR * 0.35},${52 - bodyR * 0.85}`} fill="#e2e8f0" opacity="0.9" />
+          <polygon points={`${50 + accR * 0.55},${52 - bodyR * 0.75} ${50 + accR * 0.75},${52 - bodyR * 1.05} ${50 + accR * 0.35},${52 - bodyR * 0.85}`} fill="#e2e8f0" opacity="0.9" />
+        </>
+      )}
 
       {stage === 0 ? (
         <>
@@ -207,23 +256,25 @@ function Creature({ stage, condition, color, theme = 'default', size = 72 }) {
         <circle cx="50" cy="52" r={bodyR} fill={color} />
       )}
 
+      {hasBelly && <ellipse cx="50" cy={52 + bodyR * 0.25} rx={bodyR * 0.45} ry={bodyR * 0.55} fill="#ffffff" opacity="0.22" />}
+
       {hasArms && (
         <>
-          <ellipse cx={50 - bodyR - 3} cy="48" rx={6 + stage * 0.3} ry={10 + stage * 0.4} fill={color} opacity="0.85" />
-          <ellipse cx={50 + bodyR + 3} cy="48" rx={6 + stage * 0.3} ry={10 + stage * 0.4} fill={color} opacity="0.85" />
+          <ellipse cx={50 - bodyR - 3} cy="48" rx={6 + stage * 0.4} ry={10 + stage * 0.5} fill={color} opacity="0.85" />
+          <ellipse cx={50 + bodyR + 3} cy="48" rx={6 + stage * 0.4} ry={10 + stage * 0.5} fill={color} opacity="0.85" />
         </>
       )}
 
       {hasWings && (
         <>
-          <ellipse cx={50 - bodyR - 12} cy="42" rx={10 + stage * 0.6} ry={18 + stage} fill={color} opacity="0.6" />
-          <ellipse cx={50 + bodyR + 12} cy="42" rx={10 + stage * 0.6} ry={18 + stage} fill={color} opacity="0.6" />
+          <ellipse cx={50 - accR - 14} cy="42" rx={11 + stage} ry={20 + stage * 1.3} fill={color} opacity="0.6" />
+          <ellipse cx={50 + accR + 14} cy="42" rx={11 + stage} ry={20 + stage * 1.3} fill={color} opacity="0.6" />
         </>
       )}
 
-      {hasCrown && (
+      {isFinal && (
         <polygon
-          points={`${50 - 13},${52 - bodyR - 3} ${50 - 6.5},${52 - bodyR - 14} ${50},${52 - bodyR - 3} ${50 + 6.5},${52 - bodyR - 14} ${50 + 13},${52 - bodyR - 3}`}
+          points={`${50 - 16},${52 - bodyR - 2} ${50 - 8},${52 - bodyR - 17} ${50},${52 - bodyR - 2} ${50 + 8},${52 - bodyR - 17} ${50 + 16},${52 - bodyR - 2}`}
           fill="#fbbf24"
         />
       )}
@@ -1050,12 +1101,37 @@ function ModalShell({ onClose, children }) {
   );
 }
 
-function FormModal({ initial, onSave, onClose }) {
+function FormModal({ initial, onSave, onClose, coins, unlockedThemes, onUnlockTheme }) {
   const [name, setName] = useState(initial?.name || '');
   const [icon, setIcon] = useState(initial?.icon || ICON_PRESETS[0]);
   const [color, setColor] = useState(initial?.color || COLOR_PRESETS[0]);
   const [theme, setTheme] = useState(initial?.theme || 'default');
   const canSave = name.trim().length > 0;
+
+  const themeChangeCount = initial?.themeChangeCount ?? 0;
+  const remainingChanges = ECONOMY.MAX_THEME_CHANGES - themeChangeCount;
+  // 新規作成時は「初回選択」なので回数制限の対象外。編集時のみ、上限に達していたら他のタイプへ変更不可。
+  const themeLocked = Boolean(initial) && remainingChanges <= 0;
+
+  function handleThemeClick(t) {
+    if (themeLocked && t.key !== theme) return;
+    const isUnlocked = t.free || unlockedThemes.includes(t.key);
+    if (isUnlocked) {
+      setTheme(t.key);
+      return;
+    }
+    if (coins >= ECONOMY.THEME_UNLOCK_COST) {
+      onUnlockTheme(t.key);
+      setTheme(t.key);
+    }
+  }
+
+  function handleSubmit() {
+    if (!canSave) return;
+    const themeChanged = Boolean(initial) && theme !== initial.theme;
+    const nextThemeChangeCount = themeChanged ? themeChangeCount + 1 : themeChangeCount;
+    onSave({ name: name.trim(), icon, color, theme, themeChangeCount: nextThemeChangeCount });
+  }
 
   return (
     <ModalShell onClose={onClose}>
@@ -1115,23 +1191,49 @@ function FormModal({ initial, onSave, onClose }) {
         </label>
       </div>
 
-      <label className="text-xs text-slate-400 block mb-1.5">キャラのタイプ(育ち方の系統)</label>
-      <div className="grid grid-cols-3 gap-2 mb-6">
-        {THEMES.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTheme(t.key)}
-            className="py-2 rounded-xl flex flex-col items-center justify-center gap-1 border-2 text-xs"
-            style={{ borderColor: theme === t.key ? color : '#334155', backgroundColor: theme === t.key ? '#0f172a' : 'transparent', color: theme === t.key ? '#e2e8f0' : '#64748b' }}
-          >
-            <span className="text-base">{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-xs text-slate-400">キャラのタイプ(育ち方の系統)</label>
+        <span className="text-xs text-amber-400 flex items-center gap-1"><Coins size={12} />{coins}</span>
       </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        {THEMES.map((t) => {
+          const isUnlocked = t.free || unlockedThemes.includes(t.key);
+          const canAfford = coins >= ECONOMY.THEME_UNLOCK_COST;
+          const disabledByLimit = themeLocked && t.key !== theme;
+          return (
+            <button
+              key={t.key}
+              onClick={() => handleThemeClick(t)}
+              className="py-2 rounded-xl flex flex-col items-center justify-center gap-1 border-2 text-xs relative"
+              style={{
+                borderColor: theme === t.key ? color : '#334155',
+                backgroundColor: theme === t.key ? '#0f172a' : 'transparent',
+                color: theme === t.key ? '#e2e8f0' : '#64748b',
+                opacity: disabledByLimit ? 0.3 : isUnlocked || canAfford ? 1 : 0.45,
+                cursor: disabledByLimit ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <span className="text-base">{t.icon}</span>
+              {t.label}
+              {!isUnlocked && (
+                <span className="text-[10px] flex items-center gap-0.5 text-amber-400">
+                  <Lock size={9} />{ECONOMY.THEME_UNLOCK_COST}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-slate-500 mb-6">
+        {initial
+          ? themeLocked
+            ? 'このキャラはタイプ変更の上限(2回)に達しています。'
+            : `タイプはあと${remainingChanges}回まで変更できます。`
+          : 'タイプは後から変更できますが、1つの習慣につき2回までです。'}
+      </p>
 
       <button
-        onClick={() => canSave && onSave({ name: name.trim(), icon, color, theme })}
+        onClick={handleSubmit}
         className="w-full py-3 rounded-xl font-medium"
         style={{ backgroundColor: color, color: '#020617', opacity: canSave ? 1 : 0.4, pointerEvents: canSave ? 'auto' : 'none' }}
       >
@@ -1198,6 +1300,23 @@ function DeleteConfirmModal({ habit, onConfirm, onClose }) {
 
 /* 更新履歴。新しい変更を上に追記していく。日付は目安でよい。 */
 const CHANGELOG = [
+  { date: '2026-07', items: [
+    '「クエスト」タブを追加。育てたキャラでバトルできるように(ワールド1・全7ステージ)',
+    'バトルは戦う/特殊攻撃/ガードの3コマンド、系統ごとに専用の特殊攻撃',
+    '1日1ステージまで挑戦可能。クリアするとコインを獲得',
+  ]},
+  { date: '2026-07', items: [
+    'キャラのタイプに「美容系」を追加(コインで解放するタイプ)',
+    '筋肉系・学習系・生活/休息系は最初から無料に。クリエイティブ系(と今後追加する系統)だけコインで解放',
+    '7日連続ボーナスのコインを5→10に増額',
+    'キャラのタイプ変更は、1つの習慣につき2回までに制限',
+  ]},
+  { date: '2026-07', items: [
+    'キャラの見た目をさらに大きく・派手に(しっぽ・ツノ・お腹の模様・二重オーラなどを追加)',
+    'ゲーム内コインを追加。7日連続ボーナスのたびに少しずつ貯まる',
+    'コインでキャラのタイプ(筋肉系/学習系など)を解放できるように(1系統100コイン)',
+    'チェックした瞬間にEXPポップアップ・キャラのリアクション・効果音・振動を追加',
+  ]},
   { date: '2026-07', items: [
     '進化段階を8→10段階に拡張。サイズや見た目の変化をより大きく・派手に',
     '段階が上がった瞬間に進化演出(フルスクリーンでキャラが光って生まれ変わる)が出るように',
@@ -1327,6 +1446,295 @@ function EvolutionCelebration({ habit, fromStage, toStage, onClose }) {
 }
 
 /* ============================================================
+   クエストモード: バトル画面
+   ============================================================ */
+function BattleView({ habit, habitStats, worldIndex, stageData, onExit, onResult }) {
+  const battleStats = creatureBattleStats(habitStats);
+  const special = SPECIAL_ATTACKS[habit.theme] || SPECIAL_ATTACKS.default;
+
+  const [playerHp, setPlayerHp] = useState(battleStats.maxHp);
+  const [playerMp, setPlayerMp] = useState(battleStats.maxMp);
+  const [enemyHp, setEnemyHp] = useState(stageData.hp);
+  const [log, setLog] = useState([`${stageData.name}が現れた!`]);
+  const [turnBusy, setTurnBusy] = useState(false);
+  const [result, setResult] = useState(null); // 'win' | 'lose' | null
+
+  function pushLog(line) {
+    setLog((prev) => [...prev.slice(-4), line]);
+  }
+
+  function handleCommand(cmd) {
+    if (turnBusy || result) return;
+    if (cmd === 'special' && playerMp < special.mpCost) return;
+    setTurnBusy(true);
+
+    let dmgToEnemy = 0;
+    let newPlayerHp = playerHp;
+    let newPlayerMp = playerMp;
+    let weakenThisAttack = false;
+    let logLine = '';
+
+    if (cmd === 'attack') {
+      dmgToEnemy = battleStats.atk;
+      logLine = `${habit.name}のこうげき!${dmgToEnemy}ダメージ`;
+    } else if (cmd === 'special') {
+      newPlayerMp = playerMp - special.mpCost;
+      if (special.kind === 'bigHit') {
+        dmgToEnemy = Math.round(battleStats.atk * special.multiplier);
+        logLine = `${special.label}!${dmgToEnemy}ダメージ`;
+      } else if (special.kind === 'gamble') {
+        if (Math.random() < special.hitChance) {
+          dmgToEnemy = Math.round(battleStats.atk * special.multiplier);
+          logLine = `${special.label}が命中!${dmgToEnemy}ダメージ`;
+        } else {
+          logLine = `${special.label}は外れてしまった…`;
+        }
+      } else if (special.kind === 'heal') {
+        const healAmount = Math.round(battleStats.maxHp * special.healRatio);
+        newPlayerHp = Math.min(battleStats.maxHp, playerHp + healAmount);
+        logLine = `${special.label}!HPが${healAmount}回復した`;
+      } else if (special.kind === 'weaken') {
+        dmgToEnemy = Math.round(battleStats.atk * special.multiplier);
+        weakenThisAttack = true;
+        logLine = `${special.label}!${dmgToEnemy}ダメージ`;
+      }
+    } else if (cmd === 'guard') {
+      newPlayerMp = Math.min(battleStats.maxMp, playerMp + QUEST_BALANCE.GUARD_MP_RECOVER);
+      logLine = `${habit.name}はガードの構え`;
+    }
+
+    const newEnemyHp = Math.max(0, enemyHp - dmgToEnemy);
+    pushLog(logLine);
+    setEnemyHp(newEnemyHp);
+    setPlayerHp(newPlayerHp);
+    setPlayerMp(newPlayerMp);
+
+    if (newEnemyHp <= 0) {
+      setResult('win');
+      setTurnBusy(false);
+      return;
+    }
+
+    const isGuarding = cmd === 'guard';
+    setTimeout(() => {
+      const rawDmg = weakenThisAttack ? Math.round(stageData.atk * 0.5) : stageData.atk;
+      const finalDmg = isGuarding ? Math.round(rawDmg * 0.5) : rawDmg;
+      const afterHp = Math.max(0, newPlayerHp - finalDmg);
+      pushLog(`${stageData.name}のこうげき!${finalDmg}ダメージ${isGuarding ? '(ガードで軽減)' : ''}`);
+      setPlayerHp(afterHp);
+      setTurnBusy(false);
+      if (afterHp <= 0) setResult('lose');
+    }, 700);
+  }
+
+  useEffect(() => {
+    if (!result) return;
+    const timer = setTimeout(() => onResult(result), 1300);
+    return () => clearTimeout(timer);
+  }, [result]);
+
+  const playerHpPct = Math.max(0, Math.round((playerHp / battleStats.maxHp) * 100));
+  const enemyHpPct = Math.max(0, Math.round((enemyHp / stageData.hp) * 100));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col">
+      <div className="flex items-center gap-3 p-4 border-b border-slate-800">
+        <button onClick={onExit} className="text-slate-400"><ChevronLeft size={22} /></button>
+        <span className="text-sm text-slate-300">{stageData.isBoss ? 'ボス戦' : `ステージ${stageData.stage}`}</span>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6">
+        <div className="text-center">
+          <div className="text-sm text-slate-400 mb-1">{stageData.name}</div>
+          <div className="w-48 h-3 rounded-full bg-slate-800 overflow-hidden mx-auto mb-1">
+            <div className="h-full bg-fuchsia-500" style={{ width: `${enemyHpPct}%`, transition: 'width 0.5s ease' }} />
+          </div>
+          <div className="text-xs text-slate-500" style={monoStyle}>{Math.max(0, enemyHp)} / {stageData.hp}</div>
+          <div className="mt-3">
+            <Skull size={40} className="text-fuchsia-400 mx-auto" />
+          </div>
+        </div>
+
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-3 h-24 overflow-y-auto text-xs text-slate-400 space-y-1">
+          {log.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+
+        <div className="text-center">
+          <div className="flex justify-center mb-2">
+            <Creature stage={habitStats.stage} condition={result === 'lose' ? 'down' : 'normal'} color={habit.color} theme={habit.theme} size={72} />
+          </div>
+          <div className="text-sm text-slate-300 mb-1">{habit.icon} {habit.name}</div>
+          <div className="w-48 h-3 rounded-full bg-slate-800 overflow-hidden mx-auto mb-1">
+            <div className="h-full bg-cyan-400" style={{ width: `${playerHpPct}%`, transition: 'width 0.5s ease' }} />
+          </div>
+          <div className="text-xs text-slate-500" style={monoStyle}>HP {Math.max(0, playerHp)}/{battleStats.maxHp} ・ MP {playerMp}/{battleStats.maxMp}</div>
+        </div>
+      </div>
+
+      {result ? (
+        <div className="p-6 text-center">
+          <div className="text-lg font-bold mb-1" style={{ ...displayStyle, color: result === 'win' ? '#22e2ff' : '#ff3d81' }}>
+            {result === 'win' ? '勝利!' : 'やられてしまった…'}
+          </div>
+          <p className="text-xs text-slate-500">{result === 'win' ? 'コインを獲得しました' : 'もう少し育ててから、また挑もう'}</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 p-4 border-t border-slate-800">
+          <button
+            onClick={() => handleCommand('attack')}
+            disabled={turnBusy}
+            className="py-3 rounded-xl flex flex-col items-center gap-1 text-xs bg-slate-900 border border-slate-800 text-slate-200"
+            style={{ opacity: turnBusy ? 0.5 : 1 }}
+          >
+            <Swords size={18} />戦う
+          </button>
+          <button
+            onClick={() => handleCommand('special')}
+            disabled={turnBusy || playerMp < special.mpCost}
+            className="py-3 rounded-xl flex flex-col items-center gap-1 text-xs bg-slate-900 border border-slate-800 text-slate-200"
+            style={{ opacity: turnBusy || playerMp < special.mpCost ? 0.4 : 1 }}
+          >
+            <Zap size={18} />{special.label}
+            <span className="text-[10px] text-slate-500">MP{special.mpCost}</span>
+          </button>
+          <button
+            onClick={() => handleCommand('guard')}
+            disabled={turnBusy}
+            className="py-3 rounded-xl flex flex-col items-center gap-1 text-xs bg-slate-900 border border-slate-800 text-slate-200"
+            style={{ opacity: turnBusy ? 0.5 : 1 }}
+          >
+            <Shield size={18} />ガード
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   クエストモード: ワールド1のステージ選択・パーティ編成
+   ============================================================ */
+function QuestTab({ habits, profile, onBattleResult }) {
+  const [selectedStage, setSelectedStage] = useState(null); // stageData
+  const [pickingHabitFor, setPickingHabitFor] = useState(null); // stageData
+  const [battle, setBattle] = useState(null); // { habit, habitStats, stageData }
+
+  const cleared = profile.questProgress?.world1 ?? 0;
+  const alreadyPlayedToday = profile.lastQuestAttemptDate === todayStr();
+
+  function stageStatus(stageData) {
+    if (stageData.stage <= cleared) return 'cleared';
+    if (stageData.stage === cleared + 1) return 'available';
+    return 'locked';
+  }
+
+  function handleStageClick(stageData) {
+    const status = stageStatus(stageData);
+    if (status === 'locked') return;
+    if (alreadyPlayedToday) return;
+    setPickingHabitFor(stageData);
+  }
+
+  function startBattle(habit) {
+    const habitStats = computeStats(habit);
+    if (pickingHabitFor.isBoss && habitStats.streak < pickingHabitFor.requiredStreak) return;
+    setBattle({ habit, habitStats, stageData: pickingHabitFor });
+    setPickingHabitFor(null);
+  }
+
+  function handleResult(result) {
+    const won = result === 'win';
+    const coins = won ? questCoinReward(1, battle.stageData.stage) : 0;
+    onBattleResult({ worldKey: 'world1', stageNumber: battle.stageData.stage, won, coinsEarned: coins });
+    setBattle(null);
+  }
+
+  if (battle) {
+    return (
+      <BattleView
+        habit={battle.habit}
+        habitStats={battle.habitStats}
+        worldIndex={1}
+        stageData={battle.stageData}
+        onExit={() => setBattle(null)}
+        onResult={handleResult}
+      />
+    );
+  }
+
+  return (
+    <div className="p-4 md:p-8 max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold text-slate-100 mb-1" style={displayStyle}>クエスト</h1>
+      <p className="text-xs text-slate-500 mb-6">
+        育てたキャラで戦うモード。ワールド1(全7ステージ)、1日1ステージまで挑戦できます。
+        {alreadyPlayedToday && <span className="block mt-1 text-amber-400">今日はもう挑戦しました。また明日!</span>}
+      </p>
+
+      <div className="space-y-2">
+        {WORLD_1_STAGES.map((s) => {
+          const status = stageStatus(s);
+          return (
+            <button
+              key={s.stage}
+              onClick={() => handleStageClick(s)}
+              disabled={status === 'locked' || alreadyPlayedToday}
+              className="w-full flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-2xl p-3 text-left"
+              style={{ opacity: status === 'locked' ? 0.4 : alreadyPlayedToday && status !== 'cleared' ? 0.6 : 1 }}
+            >
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: status === 'cleared' ? '#0e7490' : s.isBoss ? '#5b1a44' : '#1e293b' }}
+              >
+                {status === 'cleared' ? <Trophy size={18} className="text-cyan-300" /> : s.isBoss ? <Skull size={18} className="text-fuchsia-400" /> : <span className="text-slate-300 text-sm" style={monoStyle}>{s.stage}</span>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-slate-100 text-sm font-medium truncate">{s.name}</div>
+                <div className="text-xs text-slate-500">
+                  {s.isBoss ? `ボス・連続${s.requiredStreak}日以上が目安` : `ステージ${s.stage}`}
+                </div>
+              </div>
+              {status === 'cleared' && <span className="text-xs text-cyan-400 flex-shrink-0">クリア済み</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {pickingHabitFor && (
+        <ModalShell onClose={() => setPickingHabitFor(null)}>
+          <h2 className="text-lg font-bold text-slate-100 mb-1" style={displayStyle}>連れていくキャラを選ぶ</h2>
+          <p className="text-xs text-slate-500 mb-4">{pickingHabitFor.name}に挑む</p>
+          {habits.length === 0 ? (
+            <p className="text-sm text-slate-500">育てている習慣がありません。</p>
+          ) : (
+            <div className="space-y-2">
+              {habits.map((h) => {
+                const s = computeStats(h);
+                const blockedByStreak = pickingHabitFor.isBoss && s.streak < pickingHabitFor.requiredStreak;
+                return (
+                  <button
+                    key={h.id}
+                    onClick={() => !blockedByStreak && startBattle(h)}
+                    className="w-full flex items-center gap-3 border border-slate-800 rounded-xl p-2.5"
+                    style={{ opacity: blockedByStreak ? 0.4 : 1 }}
+                  >
+                    <Creature stage={s.stage} condition={s.condition} color={h.color} theme={h.theme} size={40} />
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="text-sm text-slate-200 truncate">{h.icon} {h.name}</div>
+                      <div className="text-xs text-slate-500" style={monoStyle}>Lv.{s.level} ・ {s.streak}日連続</div>
+                    </div>
+                    {blockedByStreak && <span className="text-xs text-fuchsia-400 flex-shrink-0">連続{pickingHabitFor.requiredStreak}日必要</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </ModalShell>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    メインアプリ
    ============================================================ */
 export default function App({ userId }) {
@@ -1335,6 +1743,7 @@ export default function App({ userId }) {
   const [tab, setTab] = useState('home');
   const [modal, setModal] = useState(null);
   const [evolution, setEvolution] = useState(null);
+  const [profile, setProfile] = useState({ coins: 0, unlockedThemes: [] });
   const router = useRouter();
 
   useEffect(() => {
@@ -1343,13 +1752,34 @@ export default function App({ userId }) {
       setHabits(loaded);
       setIsLoading(false);
     })();
-  }, []);
+    (async () => {
+      const p = await loadProfile(userId);
+      setProfile(p);
+    })();
+  }, [userId]);
 
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
+  }
+
+  async function handleUnlockTheme(themeKey) {
+    const result = await unlockTheme(userId, profile.coins, profile.unlockedThemes, themeKey, ECONOMY.THEME_UNLOCK_COST);
+    if (result) setProfile(result);
+  }
+
+  async function handleQuestResult({ worldKey, stageNumber, won, coinsEarned }) {
+    const result = await recordQuestResult(userId, {
+      worldKey,
+      stageNumber,
+      won,
+      coinsEarned,
+      currentProfile: profile,
+      todayStr: todayStr(),
+    });
+    setProfile((p) => ({ ...p, ...result }));
   }
 
   // 楽観的更新: 先に画面上のstateを更新して即座に反映し、そのあとDBへ書き込む。
@@ -1372,6 +1802,13 @@ export default function App({ userId }) {
     if (nextStats.stage > prevStats.stage) {
       setEvolution({ habit: updatedHabit, fromStage: prevStats.stage, toStage: nextStats.stage });
     }
+
+    // 7日連続ボーナスが発生した瞬間(streakが7の倍数に達した瞬間)にコインを付与
+    if (nextStats.streak > prevStats.streak && nextStats.streak % GAME_BALANCE.STREAK_BONUS_EVERY === 0) {
+      const newCoins = profile.coins + ECONOMY.STREAK_BONUS_COINS;
+      setProfile((p) => ({ ...p, coins: newCoins }));
+      addCoins(userId, profile.coins, ECONOMY.STREAK_BONUS_COINS);
+    }
   }
 
   async function handleAddHabit(data) {
@@ -1392,7 +1829,7 @@ export default function App({ userId }) {
   }
 
   function handleEditHabit(habitId, data) {
-    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme } : h)));
+    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme, themeChangeCount: data.themeChangeCount } : h)));
     updateHabitFields(habitId, data);
     setModal(null);
   }
@@ -1414,6 +1851,9 @@ export default function App({ userId }) {
 
   return (
     <div className="min-h-screen bg-slate-950" style={{ fontFamily: 'var(--font-noto-sans-jp), sans-serif' }}>
+      <div className="fixed top-3 left-3 z-40 flex items-center gap-1.5 px-3 h-9 rounded-full bg-slate-900 border border-slate-800 text-amber-400 text-sm" style={monoStyle}>
+        <Coins size={14} />{profile.coins}
+      </div>
       <button
         onClick={() => setModal({ type: 'help' })}
         className="fixed top-3 right-14 z-40 w-9 h-9 rounded-full flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-500"
@@ -1438,6 +1878,7 @@ export default function App({ userId }) {
           <NavButton active={tab === 'gallery'} onClick={() => setTab('gallery')} icon={<BookOpen size={18} />} label="キャラ図鑑" />
           <NavButton active={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<CalendarDays size={18} />} label="カレンダー" />
           <NavButton active={tab === 'playground'} onClick={() => setTab('playground')} icon={<PawPrint size={18} />} label="ひろば" />
+          <NavButton active={tab === 'quest'} onClick={() => setTab('quest')} icon={<Swords size={18} />} label="クエスト" />
           <div className="mt-auto pt-6">
             <button
               onClick={() => setModal({ type: 'add' })}
@@ -1465,32 +1906,48 @@ export default function App({ userId }) {
             <GalleryTab habits={habits} onOpenDetail={(h) => setModal({ type: 'detail', habit: h })} />
           ) : tab === 'calendar' ? (
             <GlobalCalendarTab habits={habits} onUpdateNote={handleUpdateNote} />
-          ) : (
+          ) : tab === 'playground' ? (
             <PlaygroundTab habits={habits} />
+          ) : (
+            <QuestTab habits={habits} profile={profile} onBattleResult={handleQuestResult} />
           )}
         </main>
       </div>
 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950 border-t border-slate-800 flex items-center justify-around py-2 z-40">
-        <button onClick={() => setTab('home')} className="flex flex-col items-center gap-0.5 px-3 py-1" style={{ color: tab === 'home' ? '#22e2ff' : '#64748b' }}>
-          <HomeIcon size={19} /><span className="text-xs">ホーム</span>
+        <button onClick={() => setTab('home')} className="flex flex-col items-center gap-0.5 px-2 py-1" style={{ color: tab === 'home' ? '#22e2ff' : '#64748b' }}>
+          <HomeIcon size={18} /><span className="text-xs">ホーム</span>
         </button>
-        <button onClick={() => setTab('gallery')} className="flex flex-col items-center gap-0.5 px-3 py-1" style={{ color: tab === 'gallery' ? '#22e2ff' : '#64748b' }}>
-          <BookOpen size={19} /><span className="text-xs">図鑑</span>
+        <button onClick={() => setTab('gallery')} className="flex flex-col items-center gap-0.5 px-2 py-1" style={{ color: tab === 'gallery' ? '#22e2ff' : '#64748b' }}>
+          <BookOpen size={18} /><span className="text-xs">図鑑</span>
+        </button>
+        <button onClick={() => setTab('calendar')} className="flex flex-col items-center gap-0.5 px-2 py-1" style={{ color: tab === 'calendar' ? '#22e2ff' : '#64748b' }}>
+          <CalendarDays size={18} /><span className="text-xs">カレンダー</span>
         </button>
         <button onClick={() => setModal({ type: 'add' })} className="w-12 h-12 -mt-6 rounded-full flex items-center justify-center shadow-lg flex-shrink-0" style={{ backgroundColor: '#22e2ff' }}>
           <Plus size={22} color="#020617" />
         </button>
-        <button onClick={() => setTab('calendar')} className="flex flex-col items-center gap-0.5 px-3 py-1" style={{ color: tab === 'calendar' ? '#22e2ff' : '#64748b' }}>
-          <CalendarDays size={19} /><span className="text-xs">カレンダー</span>
+        <button onClick={() => setTab('playground')} className="flex flex-col items-center gap-0.5 px-2 py-1" style={{ color: tab === 'playground' ? '#22e2ff' : '#64748b' }}>
+          <PawPrint size={18} /><span className="text-xs">ひろば</span>
         </button>
-        <button onClick={() => setTab('playground')} className="flex flex-col items-center gap-0.5 px-3 py-1" style={{ color: tab === 'playground' ? '#22e2ff' : '#64748b' }}>
-          <PawPrint size={19} /><span className="text-xs">ひろば</span>
+        <button onClick={() => setTab('quest')} className="flex flex-col items-center gap-0.5 px-2 py-1" style={{ color: tab === 'quest' ? '#22e2ff' : '#64748b' }}>
+          <Swords size={18} /><span className="text-xs">クエスト</span>
         </button>
       </div>
 
-      {modal?.type === 'add' && <FormModal onSave={handleAddHabit} onClose={() => setModal(null)} />}
-      {modal?.type === 'edit' && <FormModal initial={modal.habit} onSave={(data) => handleEditHabit(modal.habit.id, data)} onClose={() => setModal(null)} />}
+      {modal?.type === 'add' && (
+        <FormModal onSave={handleAddHabit} onClose={() => setModal(null)} coins={profile.coins} unlockedThemes={profile.unlockedThemes} onUnlockTheme={handleUnlockTheme} />
+      )}
+      {modal?.type === 'edit' && (
+        <FormModal
+          initial={modal.habit}
+          onSave={(data) => handleEditHabit(modal.habit.id, data)}
+          onClose={() => setModal(null)}
+          coins={profile.coins}
+          unlockedThemes={profile.unlockedThemes}
+          onUnlockTheme={handleUnlockTheme}
+        />
+      )}
       {modal?.type === 'detail' && currentDetailHabit && (
         <DetailModal
           habit={currentDetailHabit}
