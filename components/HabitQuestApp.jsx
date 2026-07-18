@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Plus, Check, X, Trash2, Edit3, Home as HomeIcon, BookOpen, Flame, Sparkles,
   ChevronLeft, ChevronRight, BarChart3, CalendarDays, PawPrint, LogOut, HelpCircle, StickyNote,
-  Coins, Lock, Swords, Shield, Zap, Skull, Trophy,
+  Coins, Lock, Swords, Shield, Zap, Skull, Trophy, Users, Copy,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
@@ -14,13 +14,15 @@ import {
   levelStyle, STAGE_NAMES, CONDITION_LABEL, COLOR_PRESETS, ICON_PRESETS, THEMES, ECONOMY,
   QUEST_BALANCE, SPECIAL_ATTACKS, WORLD_1_STAGES, creatureBattleStats, questCoinReward,
   displayStyle, monoStyle, todayStr, genId, getSyncedLogs, computeStats, computeStatsAsOf,
-  weeklyAggregation, monthlyAggregation, seedDemoData, isDueDate, daysUntilNextDue,
+  weeklyAggregation, monthlyAggregation, seedDemoData, isDueDate, daysUntilNextDue, isStatusEditable,
+  PAST_EDIT_WINDOW_DAYS,
 } from '@/lib/gameLogic';
 import {
   loadHabits, addHabit as apiAddHabit, seedHabits, updateHabitFields, deleteHabit as apiDeleteHabit,
   saveLogs, saveNotes,
 } from '@/lib/habitsApi';
 import { loadProfile, addCoins, unlockTheme, recordQuestResult } from '@/lib/profileApi';
+import { loadFriends, addFriendByCode } from '@/lib/friendsApi';
 
 /* ============================================================
    キャラクター SVG
@@ -796,17 +798,21 @@ function getDayAggregate(habits, ds) {
   return { scoreSum, count, noteCount, avg: count > 0 ? scoreSum / count : null };
 }
 
-function DayDetailSheet({ date, habits, onClose, onUpdateNote }) {
+function DayDetailSheet({ date, habits, onClose, onUpdateNote, onUpdateStatus }) {
   const d = new Date(date + 'T00:00:00');
   const label = new Intl.DateTimeFormat('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' }).format(d);
+  const editable = isStatusEditable(date);
   const entries = habits
     .map((h) => ({ habit: h, status: getSyncedLogs(h)[date] }))
     .filter((e) => e.status !== undefined);
+  const orderedLevels = [...CHECK_LEVELS].reverse(); // full → good → partial → none
 
   return (
     <ModalShell onClose={onClose}>
       <h2 className="text-lg font-bold text-slate-100 mb-1" style={displayStyle}>{label}</h2>
-      <p className="text-xs text-slate-500 mb-4">この日の記録と日記</p>
+      <p className="text-xs text-slate-500 mb-4">
+        {editable ? 'この日の記録と日記(記録は後から直せます)' : `この日の記録と日記(記録の修正は${PAST_EDIT_WINDOW_DAYS}日前までです)`}
+      </p>
       {entries.length === 0 ? (
         <p className="text-sm text-slate-500">この日の記録はありません。</p>
       ) : (
@@ -816,12 +822,30 @@ function DayDetailSheet({ date, habits, onClose, onUpdateNote }) {
               <div className="flex items-center gap-2 mb-2">
                 <span>{habit.icon}</span>
                 <span className="text-sm text-slate-200 flex-1 truncate">{habit.name}</span>
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full flex-shrink-0 flex items-center gap-1"
-                  style={{ ...levelStyle(status, habit.color), color: LEVEL_TEXT_COLOR[status] }}
-                >
-                  {LEVEL_SYMBOL[status]} {LEVEL_LABEL[status]}
-                </span>
+                <span className="text-xs text-slate-500 flex-shrink-0">{LEVEL_LABEL[status]}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 mb-3">
+                {orderedLevels.map((lvl) => {
+                  const isSelected = status === lvl.key;
+                  return (
+                    <button
+                      key={lvl.key}
+                      onClick={() => onUpdateStatus(habit.id, date, lvl.key)}
+                      disabled={!editable}
+                      className="h-9 rounded-lg flex items-center justify-center text-base font-medium transition-transform active:scale-90"
+                      style={{
+                        ...levelStyle(lvl.key, habit.color),
+                        color: LEVEL_TEXT_COLOR[lvl.key],
+                        outline: isSelected ? `2px solid ${habit.color}` : 'none',
+                        outlineOffset: '1px',
+                        opacity: isSelected ? 1 : editable ? 0.5 : 0.25,
+                      }}
+                      title={lvl.label}
+                    >
+                      {LEVEL_SYMBOL[lvl.key]}
+                    </button>
+                  );
+                })}
               </div>
               <textarea
                 defaultValue={(habit.notes && habit.notes[date]) || ''}
@@ -839,7 +863,7 @@ function DayDetailSheet({ date, habits, onClose, onUpdateNote }) {
   );
 }
 
-function GlobalCalendarTab({ habits, onUpdateNote }) {
+function GlobalCalendarTab({ habits, onUpdateNote, onUpdateStatus }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -933,7 +957,7 @@ function GlobalCalendarTab({ habits, onUpdateNote }) {
       </div>
 
       {selectedDate && (
-        <DayDetailSheet date={selectedDate} habits={habits} onClose={() => setSelectedDate(null)} onUpdateNote={onUpdateNote} />
+        <DayDetailSheet date={selectedDate} habits={habits} onClose={() => setSelectedDate(null)} onUpdateNote={onUpdateNote} onUpdateStatus={onUpdateStatus} />
       )}
     </div>
   );
@@ -1338,40 +1362,57 @@ function DeleteConfirmModal({ habit, onConfirm, onClose }) {
 
 /* 更新履歴。新しい変更を上に追記していく。日付は目安でよい。 */
 const CHANGELOG = [
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 12, items: [
+    'カレンダーの日別詳細から、過去の記録(◎○△×)を後から直せるように(直近3日まで。入力し忘れ・押し間違いの修正用)',
+  ]},
+  { date: '2026-07', version: 11, items: [
+    '「友達」機能を追加。自分の友達コードを教えあうことで繋がれるように(キャラの交換は近日公開予定)',
+  ]},
+  { date: '2026-07', version: 10, items: [
+    'クエストで勝った時のコイン獲得演出を強化(バーン!と目立つように)',
+  ]},
+  { date: '2026-07', version: 9, items: [
+    'クエストの「溜めの大技」を固定パターンからランダム発生に変更(必ず1ターン前に予告するので不意打ちにはならない)',
+    'アップデート内容を、次にアプリを開いたときに自動でお知らせするように',
+  ]},
+  { date: '2026-07', version: 8, items: [
+    'クエストのガードを強化。敵はランダムなタイミングで「溜めの大技」を予告してくる。見送ると痛いが、ガードで受け止めれば大幅にダメージを抑えられる読み合い要素を追加',
+    'ガードのMP回復量を増加',
+  ]},
+  { date: '2026-07', version: 7, items: [
     '「毎日」以外に「2日ごと/3日ごと/週1」の習慣も作れるように',
     'キャラの見た目を全体的に大きく、耳などの新しいパーツも追加',
     'コインの表示位置をサイドバーと被らない場所に移動',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 6, items: [
     '「クエスト」タブを追加。育てたキャラでバトルできるように(ワールド1・全7ステージ)',
     'バトルは戦う/特殊攻撃/ガードの3コマンド、系統ごとに専用の特殊攻撃',
     '1日1ステージまで挑戦可能。クリアするとコインを獲得',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 5, items: [
     'キャラのタイプに「美容系」を追加(コインで解放するタイプ)',
     '筋肉系・学習系・生活/休息系は最初から無料に。クリエイティブ系(と今後追加する系統)だけコインで解放',
     '7日連続ボーナスのコインを5→10に増額',
     'キャラのタイプ変更は、1つの習慣につき2回までに制限',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 4, items: [
     'キャラの見た目をさらに大きく・派手に(しっぽ・ツノ・お腹の模様・二重オーラなどを追加)',
     'ゲーム内コインを追加。7日連続ボーナスのたびに少しずつ貯まる',
     'コインでキャラのタイプ(筋肉系/学習系など)を解放できるように(1系統100コイン)',
     'チェックした瞬間にEXPポップアップ・キャラのリアクション・効果音・振動を追加',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 3, items: [
     '進化段階を8→10段階に拡張。サイズや見た目の変化をより大きく・派手に',
     '段階が上がった瞬間に進化演出(フルスクリーンでキャラが光って生まれ変わる)が出るように',
     'ホーム画面の各習慣にも、その場でメモを残せるボタンを追加',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 2, items: [
     '習慣ごとにキャラのアイコン・色を自由入力できるように',
     'キャラのタイプ(筋肉系/学習系/生活・休息系/クリエイティブ系)を選べるように。腕が生える段階からタイプ別の見た目に変化',
     '7日連続ボーナスを、直近7日の◎の割合に応じて変動する方式に変更',
     '「ひろば」の物理演算を調整(投げたときの初動を抑え、重さを感じられるように)',
   ]},
-  { date: '2026-07', items: [
+  { date: '2026-07', version: 1, items: [
     'Next.js + Supabaseで本番リリース(Googleログイン対応)',
     '日記機能・全体振り返りカレンダー・ひろばを追加',
   ]},
@@ -1401,6 +1442,116 @@ function HelpModal({ onClose }) {
           </div>
         ))}
       </div>
+    </ModalShell>
+  );
+}
+
+const UPDATE_NOTICE_STORAGE_KEY = 'habitquest-last-seen-version';
+
+// 前回開いた時より新しいアップデートがあれば、開いた瞬間に自動でお知らせする。
+// 「見た/見てない」はこのブラウザ内(localStorage)だけで判定するシンプルな仕組み。
+function UpdateNoticeModal({ onClose }) {
+  const latest = CHANGELOG[0];
+  return (
+    <ModalShell onClose={onClose}>
+      <div className="flex items-center gap-2 mb-1">
+        <Sparkles size={18} className="text-cyan-400" />
+        <h2 className="text-lg font-bold text-slate-100" style={displayStyle}>アップデートのお知らせ</h2>
+      </div>
+      <p className="text-xs text-slate-500 mb-4">前回から、こんな変更がありました</p>
+      <ul className="text-sm text-slate-300 space-y-1.5 list-disc list-inside mb-6">
+        {latest.items.map((item, i) => <li key={i}>{item}</li>)}
+      </ul>
+      <button
+        onClick={onClose}
+        className="w-full py-3 rounded-xl font-medium"
+        style={{ backgroundColor: '#22e2ff', color: '#020617' }}
+      >
+        わかった!
+      </button>
+    </ModalShell>
+  );
+}
+
+/* ============================================================
+   友達(友達コードで繋がる。キャラの交換機能は今後実装予定)
+   ============================================================ */
+function FriendsModal({ myCode, friends, onAddFriend, onClose }) {
+  const [input, setInput] = useState('');
+  const [message, setMessage] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleAdd() {
+    if (!input.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    const result = await onAddFriend(input.trim());
+    setMessage(result);
+    if (result.ok) setInput('');
+    setIsSubmitting(false);
+  }
+
+  function handleCopy() {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(myCode || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }
+
+  return (
+    <ModalShell onClose={onClose}>
+      <h2 className="text-lg font-bold text-slate-100 mb-4" style={displayStyle}>友達</h2>
+
+      <label className="text-xs text-slate-400 block mb-1.5">自分の友達コード(LINEなどで教えてあげてください)</label>
+      <div className="flex items-center gap-2 mb-6">
+        <div className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 tracking-widest" style={monoStyle}>
+          {myCode || '発行中...'}
+        </div>
+        <button onClick={handleCopy} className="w-11 h-11 rounded-xl flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-300 flex-shrink-0">
+          <Copy size={16} />
+        </button>
+      </div>
+      {copied && <p className="text-xs text-cyan-400 -mt-4 mb-4">コピーしました</p>}
+
+      <label className="text-xs text-slate-400 block mb-1.5">友達コードを入力して追加</label>
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value.toUpperCase().slice(0, 8))}
+          placeholder="例: AB3D9FQK"
+          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 tracking-widest outline-none focus:border-cyan-400"
+          style={monoStyle}
+        />
+        <button
+          onClick={handleAdd}
+          className="px-4 py-2.5 rounded-xl font-medium bg-cyan-400 text-slate-950 flex-shrink-0"
+          style={{ opacity: isSubmitting ? 0.6 : 1 }}
+        >
+          追加
+        </button>
+      </div>
+      {message && (
+        <p className={`text-xs mb-4 ${message.ok ? 'text-cyan-400' : 'text-fuchsia-400'}`}>{message.message}</p>
+      )}
+
+      <label className="text-xs text-slate-400 block mb-1.5 mt-4">友達一覧({friends.length}人)</label>
+      {friends.length === 0 ? (
+        <p className="text-sm text-slate-500">まだ友達がいません。コードを交換してみましょう。</p>
+      ) : (
+        <div className="space-y-2">
+          {friends.map((f) => (
+            <div key={f.friendId} className="flex items-center gap-2 border border-slate-800 rounded-xl px-3 py-2.5">
+              <Users size={16} className="text-slate-500" />
+              <span className="text-sm text-slate-200 tracking-widest" style={monoStyle}>{f.friendCode}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-slate-600 mt-6">
+        キャラを1週間だけ交換する機能は近日公開予定です。おたのしみに。
+      </p>
     </ModalShell>
   );
 }
@@ -1501,6 +1652,7 @@ function BattleView({ habit, habitStats, worldIndex, stageData, onExit, onResult
   const [log, setLog] = useState([`${stageData.name}が現れた!`]);
   const [turnBusy, setTurnBusy] = useState(false);
   const [result, setResult] = useState(null); // 'win' | 'lose' | null
+  const [chargeIncoming, setChargeIncoming] = useState(false); // 次の敵ターンが「溜めの大技」かどうか(事前に予告済み)
 
   function pushLog(line) {
     setLog((prev) => [...prev.slice(-4), line]);
@@ -1559,14 +1711,32 @@ function BattleView({ habit, habitStats, worldIndex, stageData, onExit, onResult
     }
 
     const isGuarding = cmd === 'guard';
+    const isChargeAttack = chargeIncoming;
     setTimeout(() => {
-      const rawDmg = weakenThisAttack ? Math.round(stageData.atk * 0.5) : stageData.atk;
-      const finalDmg = isGuarding ? Math.round(rawDmg * 0.5) : rawDmg;
+      const baseDmg = weakenThisAttack ? stageData.atk * 0.5 : stageData.atk;
+      let finalDmg;
+      if (isGuarding) {
+        // ガード中は「溜めの大技」の倍率そのものを無効化した上で、通常のガード軽減もかかる。
+        // 見送ると痛いが、読んでガードすれば逆に一番おいしい瞬間になる。
+        finalDmg = Math.round(baseDmg * QUEST_BALANCE.GUARD_DAMAGE_MULT);
+      } else {
+        finalDmg = Math.round(isChargeAttack ? baseDmg * QUEST_BALANCE.CHARGE_ATTACK_MULTIPLIER : baseDmg);
+      }
       const afterHp = Math.max(0, newPlayerHp - finalDmg);
-      pushLog(`${stageData.name}のこうげき!${finalDmg}ダメージ${isGuarding ? '(ガードで軽減)' : ''}`);
+      const attackLabel = isChargeAttack ? `${stageData.name}の渾身の一撃!` : `${stageData.name}のこうげき!`;
+      pushLog(`${attackLabel}${finalDmg}ダメージ${isGuarding ? '(ガードで軽減)' : ''}`);
       setPlayerHp(afterHp);
       setTurnBusy(false);
-      if (afterHp <= 0) setResult('lose');
+      if (afterHp <= 0) {
+        setResult('lose');
+        return;
+      }
+      // 溜め攻撃の直後は連続で溜めない。それ以外はランダムに次を予告するかどうか決める。
+      const willChargeNext = !isChargeAttack && Math.random() < QUEST_BALANCE.CHARGE_ATTACK_CHANCE;
+      setChargeIncoming(willChargeNext);
+      if (willChargeNext) {
+        pushLog(`${stageData.name}が力を溜め始めた…!次はガードで身構えたい`);
+      }
     }, 700);
   }
 
@@ -1616,10 +1786,26 @@ function BattleView({ habit, habitStats, worldIndex, stageData, onExit, onResult
 
       {result ? (
         <div className="p-6 text-center">
-          <div className="text-lg font-bold mb-1" style={{ ...displayStyle, color: result === 'win' ? '#22e2ff' : '#ff3d81' }}>
+          <div className="text-lg font-bold mb-2" style={{ ...displayStyle, color: result === 'win' ? '#22e2ff' : '#ff3d81' }}>
             {result === 'win' ? '勝利!' : 'やられてしまった…'}
           </div>
-          <p className="text-xs text-slate-500">{result === 'win' ? 'コインを獲得しました' : 'もう少し育ててから、また挑もう'}</p>
+          {result === 'win' ? (
+            <div className="relative flex flex-col items-center justify-center mb-1">
+              <div
+                className="absolute rounded-full animate-evoBurst"
+                style={{ width: 90, height: 90, background: 'radial-gradient(circle, #fbbf2455 0%, transparent 70%)' }}
+              />
+              <div className="animate-evoPopIn flex items-center gap-2">
+                <Coins size={28} className="text-amber-400" />
+                <span className="text-2xl font-bold text-amber-400" style={monoStyle}>
+                  +{questCoinReward(worldIndex, stageData.stage)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">報酬ゲット!</p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">もう少し育ててから、また挑もう</p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-2 p-4 border-t border-slate-800">
@@ -1787,6 +1973,7 @@ export default function App({ userId }) {
   const [modal, setModal] = useState(null);
   const [evolution, setEvolution] = useState(null);
   const [profile, setProfile] = useState({ coins: 0, unlockedThemes: [] });
+  const [friends, setFriends] = useState([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -1799,7 +1986,32 @@ export default function App({ userId }) {
       const p = await loadProfile(userId);
       setProfile(p);
     })();
+    (async () => {
+      const f = await loadFriends(userId);
+      setFriends(f);
+    })();
   }, [userId]);
+
+  async function handleAddFriend(code) {
+    const result = await addFriendByCode(code);
+    if (result.ok) {
+      const f = await loadFriends(userId);
+      setFriends(f);
+    }
+    return result;
+  }
+
+  useEffect(() => {
+    try {
+      const latestVersion = String(CHANGELOG[0]?.version ?? '');
+      const seenVersion = window.localStorage.getItem(UPDATE_NOTICE_STORAGE_KEY);
+      if (latestVersion && seenVersion !== latestVersion) {
+        setModal({ type: 'update' });
+      }
+    } catch (e) {
+      // localStorageが使えない環境では静かに諦める(通知が出ないだけで実害はない)
+    }
+  }, []);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -1871,6 +2083,17 @@ export default function App({ userId }) {
     }));
   }
 
+  // 過去の記録を後から直す(入力し忘れ・押し間違いの修正用)。直近PAST_EDIT_WINDOW_DAYS日だけ直せる。
+  function handleUpdateStatus(habitId, date, status) {
+    if (!isStatusEditable(date)) return;
+    const target = habits.find((h) => h.id === habitId);
+    if (!target) return;
+    const syncedLogs = getSyncedLogs(target);
+    const newLogs = { ...syncedLogs, [date]: status };
+    setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, logs: newLogs } : h)));
+    saveLogs(habitId, newLogs);
+  }
+
   function handleEditHabit(habitId, data) {
     setHabits((prev) => prev.map((h) => (h.id === habitId ? { ...h, name: data.name, icon: data.icon, color: data.color, theme: data.theme, themeChangeCount: data.themeChangeCount, frequencyDays: data.frequencyDays } : h)));
     updateHabitFields(habitId, data);
@@ -1897,6 +2120,13 @@ export default function App({ userId }) {
       <div className="fixed bottom-20 md:bottom-3 right-3 z-40 flex items-center gap-1.5 px-3 h-9 rounded-full bg-slate-900 border border-slate-800 text-amber-400 text-sm" style={monoStyle}>
         <Coins size={14} />{profile.coins}
       </div>
+      <button
+        onClick={() => setModal({ type: 'friends' })}
+        className="fixed top-3 right-24 z-40 w-9 h-9 rounded-full flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-500"
+        title="友達"
+      >
+        <Users size={16} />
+      </button>
       <button
         onClick={() => setModal({ type: 'help' })}
         className="fixed top-3 right-14 z-40 w-9 h-9 rounded-full flex items-center justify-center bg-slate-900 border border-slate-800 text-slate-500"
@@ -1948,7 +2178,7 @@ export default function App({ userId }) {
           ) : tab === 'gallery' ? (
             <GalleryTab habits={habits} onOpenDetail={(h) => setModal({ type: 'detail', habit: h })} />
           ) : tab === 'calendar' ? (
-            <GlobalCalendarTab habits={habits} onUpdateNote={handleUpdateNote} />
+            <GlobalCalendarTab habits={habits} onUpdateNote={handleUpdateNote} onUpdateStatus={handleUpdateStatus} />
           ) : tab === 'playground' ? (
             <PlaygroundTab habits={habits} />
           ) : (
@@ -2002,6 +2232,21 @@ export default function App({ userId }) {
       )}
       {modal?.type === 'delete' && <DeleteConfirmModal habit={modal.habit} onConfirm={handleDeleteHabit} onClose={() => setModal(null)} />}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
+      {modal?.type === 'friends' && (
+        <FriendsModal myCode={profile.friendCode} friends={friends} onAddFriend={handleAddFriend} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'update' && (
+        <UpdateNoticeModal
+          onClose={() => {
+            try {
+              window.localStorage.setItem(UPDATE_NOTICE_STORAGE_KEY, String(CHANGELOG[0]?.version ?? ''));
+            } catch (e) {
+              // 保存できなくても致命的ではない
+            }
+            setModal(null);
+          }}
+        />
+      )}
       {modal?.type === 'note' && currentNoteHabit && (
         <QuickNoteModal habit={currentNoteHabit} onClose={() => setModal(null)} onUpdateNote={handleUpdateNote} />
       )}
